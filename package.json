@@ -6,6 +6,7 @@
     "@expo/vector-icons": "^15.0.2",
     "@react-native-google-signin/google-signin": "^16.1.5",
     "@types/react": "~19.2.4",
+    "eventsource": "^2.0.2",
     "expo": "~57.0.23",
     "expo-auth-session": "~57.0.12",
     "expo-crypto": "~57.0.3",
@@ -17,6 +18,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-sse": "^1.2.1",
     "react-native-web": "^0.21.2",
     "typescript": "~6.0.3"
   },
