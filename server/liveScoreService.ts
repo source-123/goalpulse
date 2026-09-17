@@ -1,4 +1,5 @@
-// 🎯 Service qui appelle le PROXY (contourne CORS + bug react-native-sse)
+// 🎯 Service qui appelle ton PROXY (pas directement LiveScore MCP)
+// ⚠️ Remplace par TON URL de Codespaces port 3000
 const PROXY_URL = 'https://redesigned-doodle-jr754vr545jrcjjqq-3000.app.github.dev';
 
 export interface RawMatch {
@@ -40,6 +41,7 @@ export const fetchLiveScores = async (): Promise<CountryGroup[]> => {
       throw new Error(json.error || 'Erreur proxy');
     }
 
+    // Adapter : injecter 'country' dans chaque match + adapter la structure
     const groups: CountryGroup[] = (json.data || []).map((country: any) => ({
       country: country.country,
       leagues: (country.leagues || []).map((league: any) => ({
