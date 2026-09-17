@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "GoalPulse",
+    "slug": "goalpulse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "goalpulse",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.goalpulse.app"
+    },
+    "android": {
+      "package": "com.goalpulse.app",
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a5273336-e9d5-4a7a-b5e5-05dcbc93fe55"
+      }
+    }
+  }
+}
