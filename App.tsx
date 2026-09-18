@@ -6,8 +6,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LoginScreen from './LoginScreen';
 import MatchList from './MatchList';
 import Standings from './Standings';
-import FriendsScreen from './FriendsScreen';
-import PredictionsScreen from './PredictionsScreen';
+import RoomsScreen from './RoomsScreen';
+import RoomDetail from './RoomDetail';
 import { logout } from './authConfig';
 import { saveUserProfile } from './userService';
 
@@ -18,13 +18,13 @@ interface User {
   name?: string | null;
 }
 
-type Tab = 'matches' | 'predictions' | 'standings' | 'friends';
+type Tab = 'matches' | 'standings' | 'rooms';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
+  const [openRoom, setOpenRoom] = useState<{ code: string; name: string } | null>(null);
 
-  // Sauvegarder le profil au login
   useEffect(() => {
     if (user?.email) {
       saveUserProfile(user.email, user.name || null).catch(console.error);
@@ -53,6 +53,26 @@ export default function App() {
     );
   }
 
+  const displayName = user.name || user.email.split('@')[0];
+
+  // Si un salon est ouvert → plein écran
+  if (openRoom) {
+    return (
+      <LinearGradient
+        colors={['#0a0a0a', '#0f0f0f', '#151515']}
+        style={styles.container}
+      >
+        <RoomDetail
+          code={openRoom.code}
+          name={openRoom.name}
+          userEmail={user.email}
+          onClose={() => setOpenRoom(null)}
+        />
+        <StatusBar style="light" />
+      </LinearGradient>
+    );
+  }
+
   return (
     <LinearGradient
       colors={['#0a0a0a', '#0f0f0f', '#151515']}
@@ -65,9 +85,7 @@ export default function App() {
           </View>
           <View>
             <Text style={styles.headerTitle}>GoalPulse</Text>
-            <Text style={styles.welcome} numberOfLines={1}>
-              {user.name || user.email.split('@')[0]}
-            </Text>
+            <Text style={styles.welcome} numberOfLines={1}>{displayName}</Text>
           </View>
         </View>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
@@ -77,18 +95,21 @@ export default function App() {
 
       <View style={{ flex: 1 }}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
-        {tab === 'predictions' && <PredictionsScreen userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
-        {tab === 'friends' && <FriendsScreen userEmail={user.email} />}
+        {tab === 'rooms' && (
+          <RoomsScreen
+            userEmail={user.email}
+            userName={displayName}
+            onOpenRoom={(code, name) => setOpenRoom({ code, name })}
+          />
+        )}
       </View>
 
-      {/* Bottom tabs */}
       <View style={styles.bottomTabs}>
         {[
           { key: 'matches', icon: 'football', label: 'Matchs' },
-          { key: 'predictions', icon: 'trophy', label: 'Pronostics' },
-          { key: 'standings', icon: 'stats-chart', label: 'Classement' },
-          { key: 'friends', icon: 'people', label: 'Amis' },
+          { key: 'standings', icon: 'stats-chart', label: 'Classements' },
+          { key: 'rooms', icon: 'game-controller', label: 'Salons' },
         ].map((t) => (
           <TouchableOpacity
             key={t.key}
