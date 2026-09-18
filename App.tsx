@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import {
-  StyleSheet, View, Text, TouchableOpacity, Alert,
-} from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import LoginScreen from './LoginScreen';
 import MatchList from './MatchList';
 import Standings from './Standings';
+import FriendsScreen from './FriendsScreen';
+import PredictionsScreen from './PredictionsScreen';
 import { logout } from './authConfig';
+import { saveUserProfile } from './userService';
 
 interface User {
   email: string;
@@ -17,11 +18,18 @@ interface User {
   name?: string | null;
 }
 
-type Tab = 'matches' | 'standings';
+type Tab = 'matches' | 'predictions' | 'standings' | 'friends';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
+
+  // Sauvegarder le profil au login
+  useEffect(() => {
+    if (user?.email) {
+      saveUserProfile(user.email, user.name || null).catch(console.error);
+    }
+  }, [user]);
 
   const handleLogout = () => {
     Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
@@ -50,7 +58,6 @@ export default function App() {
       colors={['#0a0a0a', '#0f0f0f', '#151515']}
       style={styles.container}
     >
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.logoCircle}>
@@ -68,56 +75,42 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* Contenu */}
       <View style={{ flex: 1 }}>
-        {tab === 'matches' ? (
-          <MatchList userEmail={user.email} />
-        ) : (
-          <Standings />
-        )}
+        {tab === 'matches' && <MatchList userEmail={user.email} />}
+        {tab === 'predictions' && <PredictionsScreen userEmail={user.email} />}
+        {tab === 'standings' && <Standings />}
+        {tab === 'friends' && <FriendsScreen userEmail={user.email} />}
       </View>
 
-      {/* Bottom Tabs */}
+      {/* Bottom tabs */}
       <View style={styles.bottomTabs}>
-        <TouchableOpacity
-          style={styles.bottomTab}
-          onPress={() => setTab('matches')}
-        >
-          <Ionicons
-            name={tab === 'matches' ? 'football' : 'football-outline'}
-            size={22}
-            color={tab === 'matches' ? '#39FF14' : '#555'}
-          />
-          <Text
-            style={[
-              styles.bottomTabText,
-              tab === 'matches' && styles.bottomTabTextActive,
-            ]}
+        {[
+          { key: 'matches', icon: 'football', label: 'Matchs' },
+          { key: 'predictions', icon: 'trophy', label: 'Pronostics' },
+          { key: 'standings', icon: 'stats-chart', label: 'Classement' },
+          { key: 'friends', icon: 'people', label: 'Amis' },
+        ].map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            style={styles.bottomTab}
+            onPress={() => setTab(t.key as Tab)}
           >
-            Matchs
-          </Text>
-          {tab === 'matches' && <View style={styles.bottomTabIndicator} />}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.bottomTab}
-          onPress={() => setTab('standings')}
-        >
-          <Ionicons
-            name={tab === 'standings' ? 'trophy' : 'trophy-outline'}
-            size={22}
-            color={tab === 'standings' ? '#39FF14' : '#555'}
-          />
-          <Text
-            style={[
-              styles.bottomTabText,
-              tab === 'standings' && styles.bottomTabTextActive,
-            ]}
-          >
-            Classement
-          </Text>
-          {tab === 'standings' && <View style={styles.bottomTabIndicator} />}
-        </TouchableOpacity>
+            <Ionicons
+              name={(tab === t.key ? t.icon : `${t.icon}-outline`) as any}
+              size={22}
+              color={tab === t.key ? '#39FF14' : '#555'}
+            />
+            <Text
+              style={[
+                styles.bottomTabText,
+                tab === t.key && styles.bottomTabTextActive,
+              ]}
+            >
+              {t.label}
+            </Text>
+            {tab === t.key && <View style={styles.bottomTabIndicator} />}
+          </TouchableOpacity>
+        ))}
       </View>
 
       <StatusBar style="light" />
@@ -155,22 +148,14 @@ const styles = StyleSheet.create({
     paddingBottom: 25,
   },
   bottomTab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    position: 'relative',
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    gap: 3, position: 'relative',
   },
-  bottomTabText: {
-    color: '#555', fontSize: 11, fontWeight: '600',
-  },
+  bottomTabText: { color: '#555', fontSize: 10, fontWeight: '600' },
   bottomTabTextActive: { color: '#39FF14' },
   bottomTabIndicator: {
-    position: 'absolute',
-    top: -9,
-    width: 30,
-    height: 2,
-    backgroundColor: '#39FF14',
-    borderRadius: 1,
+    position: 'absolute', top: -9,
+    width: 30, height: 2,
+    backgroundColor: '#39FF14', borderRadius: 1,
   },
 });
