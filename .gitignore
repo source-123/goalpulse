@@ -38,3 +38,9 @@ yarn-error.*
 
 # TypeScript
 *.tsbuildinfo
+
+# Env files (NEVER push)
+*.env
+.env
+cloudflare-worker/.env
+server/.env
