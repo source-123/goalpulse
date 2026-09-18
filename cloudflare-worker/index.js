@@ -1,12 +1,21 @@
-// ☁️ Cloudflare Worker — Proxy LiveScore MCP
-// Compatible avec le runtime V8 de Cloudflare
-// Routes : /api/live-scores, /api/match/:id, /api/standings/:id, /health
+// ☁️ Cloudflare Worker — Proxy Football-Data.org
+// Cache API intégré (pas de KV setup)
+// Token: 20fcd3d508e24984b82ba762b50d0ab0
+
+const API_TOKEN = '20fcd3d508e24984b82ba762b50d0ab0';
+const BASE_URL = 'https://api.football-data.org/v4';
+const USER_AGENT = 'GoalPulse/1.0 (+https://github.com/source-123/goalpulse)';
+
+// Durées de cache (en secondes)
+const CACHE_LIVE = 60;    // 1 min pour matchs live
+const CACHE_MATCH = 300;  // 5 min pour détail
+const CACHE_STANDINGS = 600; // 10 min pour classement
+const CACHE_COMPETITIONS = 3600; // 1h pour liste
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -17,85 +26,67 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // 🏥 Health check
     if (url.pathname === '/health') {
-      return jsonResponse({ status: 'ok' }, corsHeaders);
+      return jsonResponse(
+        { status: 'ok', source: 'football-data.org', ts: Date.now() },
+        corsHeaders
+      );
     }
 
-    // 🏠 Live scores
-     if (url.pathname === '/api/live-scores') {
-      try {
-        console.log('[WORKER] Fetching live scores...');
-        const data = await callMCPTool('get_live_scores');
-        console.log('[WORKER] Success:', JSON.stringify(data).substring(0, 200));
-        return jsonResponse({ success: true, data }, corsHeaders);
-      } catch (err) {
-        console.error('[WORKER ERROR]', err.message, err.stack);
-        return jsonResponse(
-          { 
-            success: false, 
-            error: err.message,
-            stack: err.stack?.substring(0, 500),
-          },
-          corsHeaders,
-          500
-        );
-      }
+    // 🏠 Matchs live (aujourd'hui)
+    if (url.pathname === '/api/live-scores') {
+      return withCache(
+        request,
+        ctx,
+        corsHeaders,
+        CACHE_LIVE,
+        async () => {
+          const today = new Date().toISOString().split('T')[0];
+          const data = await fetchFD(`/matches?date=${today}`);
+          return { success: true, data: transformMatches(data) };
+        }
+      );
+    }
+
+    // 📅 Matchs d'une date (YYYY-MM-DD)
+    if (url.pathname.startsWith('/api/matches/')) {
+      const date = url.pathname.split('/').pop();
+      return withCache(request, ctx, corsHeaders, CACHE_LIVE, async () => {
+        const data = await fetchFD(`/matches?date=${date}`);
+        return { success: true, data: transformMatches(data) };
+      });
     }
 
     // 📊 Détail d'un match
     if (url.pathname.startsWith('/api/match/')) {
       const id = url.pathname.split('/').pop();
-      try {
-        const data = await callMCPTool('get_match', { match_id: id });
-        return jsonResponse({ success: true, data }, corsHeaders);
-      } catch (err) {
-        return jsonResponse(
-          { success: false, error: err.message },
-          corsHeaders,
-          500
-        );
-      }
+      return withCache(request, ctx, corsHeaders, CACHE_MATCH, async () => {
+        const data = await fetchFD(`/matches/${id}`);
+        return { success: true, data };
+      });
     }
 
-    // 🏆 Classement d'une ligue
+    // 🏆 Classement d'une compétition (PL, PD, SA, BL1, FL1, CL...)
     if (url.pathname.startsWith('/api/standings/')) {
-      const id = url.pathname.split('/').pop();
+      const code = url.pathname.split('/').pop();
+      return withCache(request, ctx, corsHeaders, CACHE_STANDINGS, async () => {
+        const data = await fetchFD(`/competitions/${code}/standings`);
+        const table = data.standings?.[0]?.table || [];
+        return { success: true, data: table };
+      });
+    }
 
-      // Essayer plusieurs noms d'outils MCP
-      const tools = [
-        { name: 'get_standings', args: { league_id: id } },
-        { name: 'getStandings', args: { league_id: id } },
-        { name: 'get_league_standings', args: { league_id: id } },
-        { name: 'standings', args: { league_id: id } },
-        { name: 'get_standings', args: { league: id } },
-        { name: 'get_table', args: { league_id: id } },
-      ];
-
-      const errors = [];
-      for (const tool of tools) {
-        try {
-          const data = await callMCPTool(tool.name, tool.args);
-          if (data) {
-            return jsonResponse(
-              { success: true, tool: tool.name, data },
-              corsHeaders
-            );
-          }
-        } catch (err) {
-          errors.push(`${tool.name}: ${err.message}`);
-        }
-      }
-
-      return jsonResponse(
-        {
-          success: false,
-          error: 'Aucun outil classement trouvé',
-          tried: tools.map((t) => t.name),
-          errors,
-        },
+    // 🏆 Liste des compétitions
+    if (url.pathname === '/api/competitions') {
+      return withCache(
+        request,
+        ctx,
         corsHeaders,
-        404
+        CACHE_COMPETITIONS,
+        async () => {
+          const data = await fetchFD('/competitions');
+          return { success: true, data: data.competitions || [] };
+        }
       );
     }
 
@@ -104,121 +95,149 @@ export default {
 };
 
 // ==================================================
-// 🔧 Appel MCP via SSE
+// 🔧 Appel Football-Data.org
 // ==================================================
-async function callMCPTool(toolName, args = {}) {
-  const sseRes = await fetch('https://livescoremcp.com/sse', {
+async function fetchFD(path) {
+  const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'X-Auth-Token': API_TOKEN,
+      'User-Agent': USER_AGENT,
+      Accept: 'application/json',
     },
   });
 
-  if (!sseRes.ok) throw new Error('SSE connection failed');
-
-  const reader = sseRes.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let sessionEndpoint = null;
-  let requestId = null;
-  let resolved = false;
-  let result = null;
-  let error = null;
-
-  const TIMEOUT = 25000;
-  const startTime = Date.now();
-
-  try {
-    while (!resolved) {
-      if (Date.now() - startTime > TIMEOUT) {
-        throw new Error('Timeout 25s');
-      }
-
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const events = buffer.split('\n\n');
-      buffer = events.pop() || '';
-
-      for (const eventBlock of events) {
-        const lines = eventBlock.split('\n');
-        let eventType = 'message';
-        let eventData = '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            const dataLine = line.slice(5);
-            eventData += dataLine.startsWith(' ')
-              ? dataLine.slice(1)
-              : dataLine;
-          }
-        }
-
-        // Événement endpoint (URL de session)
-        if (eventType === 'endpoint' && !sessionEndpoint) {
-          sessionEndpoint = eventData;
-          requestId = Date.now();
-
-          fetch(sessionEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: requestId,
-              method: 'tools/call',
-              params: { name: toolName, arguments: args },
-            }),
-          }).catch((e) => {
-            error = e;
-            resolved = true;
-          });
-        }
-
-        // Événement message (la réponse)
-        if (eventType === 'message' && sessionEndpoint && !resolved) {
-          try {
-            const parsed = JSON.parse(eventData);
-            if (parsed.id === requestId) {
-              if (parsed.error) throw new Error(parsed.error.message);
-
-              const text = parsed.result?.content?.[0]?.text;
-              if (!text) throw new Error('No content');
-
-              const candidates = [
-                text.indexOf('['),
-                text.indexOf('{'),
-              ].filter((i) => i >= 0);
-              const jsonStart = candidates.length
-                ? Math.min(...candidates)
-                : -1;
-
-              if (jsonStart === -1) {
-                result = { raw: text };
-              } else {
-                result = JSON.parse(text.substring(jsonStart));
-              }
-              resolved = true;
-            }
-          } catch (e) {
-            error = e;
-            resolved = true;
-          }
-        }
-      }
-    }
-  } finally {
-    try {
-      await reader.cancel();
-    } catch (e) {}
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`FD API ${res.status}: ${text.substring(0, 200)}`);
   }
 
-  if (error) throw error;
-  if (!resolved) throw new Error('No response');
-  return result;
+  return res.json();
+}
+
+// ==================================================
+// 🔄 Transforme la réponse en format attendu par l'app
+// ==================================================
+function transformMatches(data) {
+  const matches = data.matches || [];
+
+  // Regrouper par pays (area) puis par compétition
+  const byCountry = {};
+
+  for (const m of matches) {
+    const country = m.area?.name || m.competition?.area?.name || 'International';
+    const leagueName = m.competition?.name || 'Autre';
+    const leagueKey = m.competition?.code || m.competition?.id?.toString() || 'X';
+
+    if (!byCountry[country]) byCountry[country] = {};
+    if (!byCountry[country][leagueKey]) {
+      byCountry[country][leagueKey] = {
+        key: leagueKey,
+        league: leagueName,
+        matches: [],
+      };
+    }
+
+    const homeScore = m.score?.fullTime?.home;
+    const awayScore = m.score?.fullTime?.away;
+    const scoretime =
+      homeScore !== null && homeScore !== undefined
+        ? `${homeScore} - ${awayScore}`
+        : ' - ';
+
+    // Statut normalisé
+    let status = '';
+    if (m.status === 'IN_PLAY') status = 'LIVE';
+    else if (m.status === 'PAUSED') status = 'HT';
+    else if (m.status === 'FINISHED') status = 'FT';
+    else if (m.status === 'SCHEDULED' || m.status === 'TIMED') status = 'NS';
+    else if (m.status === 'POSTPONED') status = 'Postp.';
+    else if (m.status === 'CANCELLED') status = 'Canc.';
+    else status = m.status || '';
+
+    // Heure locale (HH:MM)
+    let time = '--:--';
+    if (m.utcDate) {
+      const d = new Date(m.utcDate);
+      time = d.toISOString().substring(11, 16);
+    }
+
+    // Date au format JJ/MM/AAAA
+    let date = '';
+    if (m.utcDate) {
+      const [y, mo, d] = m.utcDate.split('T')[0].split('-');
+      date = `${d}/${mo}/${y}`;
+    }
+
+    byCountry[country][leagueKey].matches.push({
+      id: m.id.toString(),
+      date,
+      time,
+      status,
+      localteam: m.homeTeam?.shortName || m.homeTeam?.name || 'Home',
+      visitorteam: m.awayTeam?.shortName || m.awayTeam?.name || 'Away',
+      scoretime,
+      leaguename: leagueName,
+      leagueid: m.competition?.id?.toString() || '',
+      country,
+      // Champs supplémentaires utiles
+      homeCrest: m.homeTeam?.crest,
+      awayCrest: m.awayTeam?.crest,
+      competitionCode: m.competition?.code,
+      utcDate: m.utcDate,
+    });
+  }
+
+  // Transformer en tableau
+  return Object.keys(byCountry)
+    .map((country) => ({
+      country,
+      leagues: Object.values(byCountry[country]),
+    }))
+    .filter((c) => c.leagues.length > 0);
+}
+
+// ==================================================
+// 💾 Cache API helper
+// ==================================================
+async function withCache(request, ctx, corsHeaders, ttlSeconds, fetchFn) {
+  const cache = caches.default;
+  const cacheKey = new Request(request.url, { method: 'GET' });
+
+  // Chercher dans le cache
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const response = new Response(cached.body, cached);
+    response.headers.set('X-Cache', 'HIT');
+    Object.entries(corsHeaders).forEach(([k, v]) => response.headers.set(k, v));
+    return response;
+  }
+
+  // Sinon, appeler l'API
+  try {
+    const json = await fetchFn();
+    const response = new Response(JSON.stringify(json), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${ttlSeconds}`,
+        'X-Cache': 'MISS',
+        ...corsHeaders,
+      },
+    });
+
+    // Mettre en cache (waitUntil évite de bloquer la réponse)
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+
+    return response;
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ success: false, error: err.message }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
+      }
+    );
+  }
 }
 
 function jsonResponse(data, headers, status = 200) {

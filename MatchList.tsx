@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
@@ -49,11 +50,17 @@ export default function MatchList({ userEmail }: MatchListProps) {
     setRefreshing(false);
   }, []);
 
-  useEffect(() => {
-    loadScores();
-    const interval = setInterval(() => loadScores(true), 60000);
-    return () => clearInterval(interval);
-  }, [loadScores]);
+ useEffect(() => {
+  loadScores();
+
+  const subscription = AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      loadScores(true); // silent reload
+    }
+  });
+
+  return () => subscription.remove();
+}, [loadScores]);
 
   const onRefresh = () => {
     setRefreshing(true);
