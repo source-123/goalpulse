@@ -61,7 +61,8 @@ export default function App() {
     Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
       { text: 'Annuler', style: 'cancel' },
       {
-        text: 'Déconnexion', style: 'destructive',
+        text: 'Déconnexion',
+        style: 'destructive',
         onPress: async () => {
           await logout();
           setUser(null);
@@ -70,6 +71,7 @@ export default function App() {
     ]);
   };
 
+  // 🎬 SPLASH SCREEN
   if (restoring) {
     return (
       <LinearGradient colors={['#0a0a0a', '#0f0f0f']} style={styles.container}>
@@ -87,6 +89,7 @@ export default function App() {
     );
   }
 
+  // 🔐 LOGIN
   if (!user) {
     return (
       <>
@@ -98,6 +101,7 @@ export default function App() {
 
   const displayName = user.name || user.email.split('@')[0];
 
+  // 🎮 ROOM DÉTAIL (plein écran)
   if (openRoom) {
     return (
       <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#151515']} style={styles.container}>
@@ -105,6 +109,7 @@ export default function App() {
           code={openRoom.code}
           name={openRoom.name}
           userEmail={user.email}
+          userName={displayName}
           onClose={() => setOpenRoom(null)}
         />
         <StatusBar style="light" />
@@ -121,6 +126,7 @@ export default function App() {
 
   return (
     <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#151515']} style={styles.container}>
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.logoCircle}>
@@ -140,6 +146,7 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* CONTENU */}
       <View style={{ flex: 1, paddingBottom: 100 }}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
@@ -155,6 +162,7 @@ export default function App() {
         )}
       </View>
 
+      {/* 🎨 BARRE FLOTTANTE */}
       <View style={styles.navBarWrapper}>
         <View style={styles.navBar}>
           {TABS.map((t) => {
@@ -197,6 +205,8 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
+
+  // 🎬 SPLASH
   splashBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   splashImage: { width: 140, height: 140, borderRadius: 70 },
   splashTitle: {
@@ -204,6 +214,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2, marginTop: 25,
   },
 
+  // HEADER
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', paddingHorizontal: 20, marginBottom: 15,
@@ -229,6 +240,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#333',
   },
 
+  // 🎨 BARRE FLOTTANTE
   navBarWrapper: {
     position: 'absolute',
     bottom: Platform.OS === 'android' ? 20 : 40,
