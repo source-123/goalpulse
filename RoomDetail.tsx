@@ -14,8 +14,7 @@ import {
 } from './roomService';
 import { getUserKey } from './userService';
 import {
-  fetchLiveScores, CountryGroup, RawMatch,
-  formatTime, isUpcomingStatus,
+  fetchLiveScores, CountryGroup, RawMatch, formatTime,
 } from './liveScoreService';
 import TeamLogo from './TeamLogo';
 import RoomBets from './RoomBets';
@@ -55,25 +54,20 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
     };
   }, [code]);
 
-  // Créateur du salon ?
   const isCreator = useMemo(() => {
     if (members.length === 0) return false;
-    // Le premier membre (le créateur) est celui dont le userKey est dans info.createdBy
-    // On le déduit : le créateur est celui qui a le addedAt le plus ancien
     const sorted = [...members].sort((a, b) => a.joinedAt - b.joinedAt);
     return sorted[0]?.userKey === myKey;
   }, [members, myKey]);
 
-  // Mes paris
   const myPreds = useMemo(() => predictions[myKey] || {}, [predictions, myKey]);
 
-  // Classement
   const leaderboard = useMemo(
     () => computeRoomLeaderboard(members, predictions),
     [members, predictions]
   );
 
-  // Matchs à venir (dans la liste globale) pour le picker
+  // ⭐ TOUS les matchs non encore ajoutés
   const upcomingGroups = useMemo(() => {
     return allGroups
       .map((c) => ({
@@ -82,9 +76,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
           .map((l) => ({
             ...l,
             matches: l.matches.filter(
-              (m) =>
-                isUpcomingStatus(m.status) &&
-                !selectedMatches.find((sm) => sm.matchId === m.id)
+              (m) => !selectedMatches.find((sm) => sm.matchId === m.id)
             ),
           }))
           .filter((l) => l.matches.length > 0),
@@ -103,7 +95,6 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
         status: match.status,
         scoretime: match.scoretime,
       });
-      Alert.alert('✅ Ajouté', `${match.localteam} vs ${match.visitorteam}`);
     } catch (e: any) {
       Alert.alert('Erreur', e.message);
     }
@@ -207,7 +198,9 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
         </TouchableOpacity>
         <View style={styles.headerTitleBox}>
           <Text style={styles.headerTitle} numberOfLines={1}>{name}</Text>
-          <Text style={styles.headerCode}>{code} • {members.length} joueur{members.length > 1 ? 's' : ''}{isCreator ? ' • 👑 Créateur' : ''}</Text>
+          <Text style={styles.headerCode}>
+            {code} • {members.length} joueur{members.length > 1 ? 's' : ''}{isCreator ? ' • 👑' : ''}
+          </Text>
         </View>
         <TouchableOpacity onPress={handleShare} style={[styles.iconBtn, { borderColor: '#39FF14' }]}>
           <Ionicons name="share-social" size={20} color="#39FF14" />
@@ -259,8 +252,8 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                 </Text>
                 <Text style={styles.emptySubtext}>
                   {isCreator
-                    ? 'Clique sur "Ajouter des matchs" pour commencer'
-                    : 'Le créateur du salon va bientôt ajouter des matchs'}
+                    ? 'Clique sur "Ajouter des matchs"'
+                    : 'Le créateur va ajouter des matchs'}
                 </Text>
               </View>
             ) : (
@@ -270,16 +263,14 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                   <View key={sm.matchId} style={styles.matchCard}>
                     <View style={styles.matchHeader}>
                       <Text style={styles.leagueName}>{sm.matchInfo.leaguename}</Text>
-                      <View style={styles.matchActions}>
-                        {isCreator && (
-                          <TouchableOpacity
-                            onPress={() => handleRemoveMatch(sm)}
-                            style={styles.actionIconBtn}
-                          >
-                            <Ionicons name="trash-outline" size={16} color="#FF3366" />
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                      {isCreator && (
+                        <TouchableOpacity
+                          onPress={() => handleRemoveMatch(sm)}
+                          style={styles.actionIconBtn}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#FF3366" />
+                        </TouchableOpacity>
+                      )}
                     </View>
 
                     <View style={styles.matchTeams}>
@@ -379,7 +370,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
         <View style={{ height: 60 }} />
       </ScrollView>
 
-      {/* Picker : choisir les matchs */}
+      {/* Picker matchs */}
       <Modal visible={showPicker} animationType="slide" transparent>
         <View style={styles.pickerOverlay}>
           <View style={styles.pickerSheet}>
@@ -401,26 +392,32 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                     {c.leagues.map((l, li) => (
                       <View key={li}>
                         <Text style={styles.leagueTitle}>{l.league}</Text>
-                        {l.matches.map((m, mi) => (
-                          <TouchableOpacity
-                            key={mi}
-                            style={styles.pickMatchRow}
-                            onPress={() => handleAddMatch(m)}
-                          >
-                            <View style={styles.pickTime}>
-                              <Text style={styles.pickTimeText}>{formatTime(m.time)}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.pickTeam} numberOfLines={1}>
-                                {m.localteam}
-                              </Text>
-                              <Text style={styles.pickTeam} numberOfLines={1}>
-                                {m.visitorteam}
-                              </Text>
-                            </View>
-                            <Ionicons name="add-circle" size={26} color="#39FF14" />
-                          </TouchableOpacity>
-                        ))}
+                        {l.matches.map((m, mi) => {
+                          const isLive = m.status === 'HT' || (parseInt(m.status, 10) > 0 && parseInt(m.status, 10) <= 90);
+                          const isFinished = m.status === 'FT' || parseInt(m.status, 10) >= 90;
+                          return (
+                            <TouchableOpacity
+                              key={mi}
+                              style={styles.pickMatchRow}
+                              onPress={() => handleAddMatch(m)}
+                            >
+                              <View style={styles.pickTime}>
+                                <Text style={styles.pickTimeText}>{formatTime(m.time)}</Text>
+                                {isLive && <Text style={styles.pickBadgeLive}>🔴</Text>}
+                                {isFinished && <Text style={styles.pickBadgeDone}>✅</Text>}
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.pickTeam} numberOfLines={1}>
+                                  {m.localteam}
+                                </Text>
+                                <Text style={styles.pickTeam} numberOfLines={1}>
+                                  {m.visitorteam}
+                                </Text>
+                              </View>
+                              <Ionicons name="add-circle" size={26} color="#39FF14" />
+                            </TouchableOpacity>
+                          );
+                        })}
                       </View>
                     ))}
                   </View>
@@ -565,7 +562,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 10,
   },
   leagueName: { color: '#666', fontSize: 11, flex: 1 },
-  matchActions: { flexDirection: 'row', gap: 6 },
   actionIconBtn: {
     width: 30, height: 30, borderRadius: 8,
     backgroundColor: '#FF336615',
@@ -642,8 +638,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a', padding: 10, borderRadius: 10,
     marginBottom: 6, borderWidth: 1, borderColor: '#262626',
   },
-  pickTime: { width: 40 },
-  pickTimeText: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
+  pickTime: { width: 40, alignItems: 'center' },
+  pickTimeText: { color: '#39FF14', fontSize: 10, fontWeight: 'bold' },
+  pickBadgeLive: { fontSize: 8, marginTop: 1 },
+  pickBadgeDone: { fontSize: 8, marginTop: 1 },
   pickTeam: { color: '#fff', fontSize: 12 },
 
   betOverlay: {
