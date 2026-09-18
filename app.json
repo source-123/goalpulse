@@ -4,23 +4,32 @@
     "slug": "goalpulse",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "goalpulse",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.goalpulse.app"
+      "bundleIdentifier": "com.goalpulse.app",
+      "icon": "./assets/icon.png"
     },
     "android": {
       "package": "com.goalpulse.app",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0a0a0a"
+      }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/icon.png"
     },
-    "plugins": [
-      "expo-web-browser",
-      "@react-native-google-signin/google-signin"
-    ],
+    "plugins": ["expo-web-browser"],
     "extra": {
       "eas": {
         "projectId": "a5273336-e9d5-4a7a-b5e5-05dcbc93fe55"
