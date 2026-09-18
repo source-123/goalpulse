@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "690178162890",
+    "firebase_url": "https://goalpulse-app-b000c-default-rtdb.firebaseio.com",
+    "project_id": "goalpulse-app-b000c",
+    "storage_bucket": "goalpulse-app-b000c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:690178162890:android:3da4155fed43e3b5803433",
+        "android_client_info": {
+          "package_name": "com.goalpulse.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "690178162890-rtfdf6gh92e4ivk9p41p8aidpnvihcrc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-VXWuusjE6CT1fJDF_HmKFFNm-5O2KtA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "690178162890-rtfdf6gh92e4ivk9p41p8aidpnvihcrc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
