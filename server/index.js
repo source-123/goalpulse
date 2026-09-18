@@ -5,14 +5,15 @@ const EventSource = require('eventsource');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SSE_URL = 'https://livescoremcp.com/sse';
+const FD_TOKEN = '20fcd3d508e24984b82ba762b50d0ab0';
 
 app.use(cors());
 
 // ==================================================
-// 💾 CACHE MÉMOIRE (économise les appels MCP)
+// 💾 CACHE MÉMOIRE
 // ==================================================
 const cache = new Map();
-const CACHE_TTL = 20 * 1000; // 20 secondes
+const CACHE_TTL = 30 * 1000; // 30 secondes
 
 const getCached = (key) => {
   const item = cache.get(key);
@@ -29,7 +30,7 @@ const setCache = (key, data) => {
 };
 
 // ==================================================
-// 🔧 Appel MCP via SSE
+// 🔧 APPEL MCP via SSE (LiveScore)
 // ==================================================
 const callMCPTool = (toolName, args = {}) => {
   return new Promise((resolve, reject) => {
@@ -89,25 +90,23 @@ const callMCPTool = (toolName, args = {}) => {
 };
 
 // ==================================================
-// 🏥 Health check (pour UptimeRobot)
+// 🏥 HEALTH CHECK
 // ==================================================
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    source: 'livescoremcp.com',
+    source: 'livescoremcp.com + football-data.org',
     cached: cache.size,
     ts: Date.now(),
   });
 });
 
 // ==================================================
-// 🏠 Scores live (avec cache 60s)
+// 🏠 SCORES LIVE (LiveScore MCP + cache 30s)
 // ==================================================
 app.get('/api/live-scores', async (req, res) => {
   const cached = getCached('live-scores');
-  if (cached) {
-    return res.json(cached);
-  }
+  if (cached) return res.json(cached);
 
   try {
     const data = await callMCPTool('get_live_scores');
@@ -121,7 +120,27 @@ app.get('/api/live-scores', async (req, res) => {
 });
 
 // ==================================================
-// 📊 Détail d'un match (cache 5 min)
+// 📅 MATCHS PAR DATE (LiveScore MCP)
+// ==================================================
+app.get('/api/matches/:date', async (req, res) => {
+  const key = `matches-${req.params.date}`;
+  const cached = getCached(key);
+  if (cached) return res.json(cached);
+
+  try {
+    const data = await callMCPTool('get_day_fixtures', {
+      date: req.params.date,
+    });
+    const result = { success: true, data };
+    setCache(key, result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================================================
+// 📊 DÉTAIL D'UN MATCH (LiveScore MCP)
 // ==================================================
 app.get('/api/match/:id', async (req, res) => {
   const key = `match-${req.params.id}`;
@@ -139,41 +158,74 @@ app.get('/api/match/:id', async (req, res) => {
 });
 
 // ==================================================
-// 🏆 Classement (cache 10 min)
+// 🏆 CLASSEMENT (Football-Data.org — 12 grandes ligues)
 // ==================================================
-app.get('/api/standings/:id', async (req, res) => {
-  const key = `standings-${req.params.id}`;
+// Codes: PL, PD, SA, BL1, FL1, CL, DED, PPL, BSA, ELC, EC, WC
+app.get('/api/standings/:code', async (req, res) => {
+  const key = `standings-${req.params.code}`;
   const cached = getCached(key);
   if (cached) return res.json(cached);
 
-  const tools = [
-    { name: 'get_standings', args: { league_id: req.params.id } },
-    { name: 'getStandings', args: { league_id: req.params.id } },
-    { name: 'get_table', args: { league_id: req.params.id } },
-  ];
-  const errors = [];
+  try {
+    console.log(`🏆 Fetch standings: ${req.params.code}`);
+    const fdRes = await fetch(
+      `https://api.football-data.org/v4/competitions/${req.params.code}/standings`,
+      {
+        headers: {
+          'X-Auth-Token': FD_TOKEN,
+          'User-Agent': 'GoalPulse/1.0',
+          Accept: 'application/json',
+        },
+      }
+    );
 
-  for (const t of tools) {
-    try {
-      const data = await callMCPTool(t.name, t.args);
-      const result = { success: true, tool: t.name, data };
-      setCache(key, result);
-      return res.json(result);
-    } catch (err) {
-      errors.push(`${t.name}: ${err.message}`);
+    if (!fdRes.ok) {
+      const text = await fdRes.text();
+      throw new Error(`FD ${fdRes.status}: ${text.substring(0, 150)}`);
     }
-  }
 
-  res.status(404).json({ success: false, error: 'Aucun outil trouvé', errors });
+    const json = await fdRes.json();
+    const table = json.standings?.[0]?.table || [];
+
+    const result = {
+      success: true,
+      competition: json.competition?.name || req.params.code,
+      area: json.competition?.area?.name || '',
+      season: json.season?.startDate
+        ? `${new Date(json.season.startDate).getFullYear()}/${new Date(json.season.endDate).getFullYear()}`
+        : '',
+      data: table.map((row) => ({
+        position: row.position,
+        team: row.team?.shortName || row.team?.name || 'Team',
+        crest: row.team?.crest,
+        played: row.playedGames,
+        won: row.won,
+        draw: row.draw,
+        lost: row.lost,
+        goalsFor: row.goalsFor,
+        goalsAgainst: row.goalsAgainst,
+        goalDiff: row.goalDifference,
+        points: row.points,
+        form: row.form || '',
+      })),
+    };
+
+    setCache(key, result);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Erreur standings:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ==================================================
-// 🚀 Démarrage
+// 🚀 DÉMARRAGE
 // ==================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log(`🚀 Proxy GoalPulse sur port ${PORT}`);
   console.log(`💾 Cache: ${CACHE_TTL / 1000}s`);
-  console.log(`🌐 Source: ${SSE_URL}`);
+  console.log(`🌐 LiveScore MCP: ${SSE_URL}`);
+  console.log(`🏆 Football-Data.org: activé`);
   console.log('');
 });

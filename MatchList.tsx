@@ -1,14 +1,13 @@
-import { AppState } from 'react-native';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ActivityIndicator,
   TouchableOpacity, RefreshControl, ScrollView,
-  TextInput, Alert
+  TextInput, Alert, AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   fetchLiveScores, CountryGroup, RawMatch,
-  formatTime, isLiveStatus, getStatusLabel
+  formatTime, isLiveStatus, getStatusLabel,
 } from './liveScoreService';
 import TeamLogo from './TeamLogo';
 import MatchDetail from './MatchDetail';
@@ -16,22 +15,24 @@ import { subscribeFavorites, toggleFavorite } from './favoritesService';
 
 interface MatchListProps {
   userEmail: string;
+  statusFilter?: 'all' | 'live' | 'finished' | 'upcoming';
 }
 
-type Filter = 'live' | 'all' | 'favorites';
+type Tab = 'all' | 'live' | 'finished' | 'upcoming';
 
-export default function MatchList({ userEmail }: MatchListProps) {
+export default function MatchList({ userEmail, statusFilter = 'all' }: MatchListProps) {
   const [groups, setGroups] = useState<CountryGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('live');
+  const [tab, setTab] = useState<Tab>(statusFilter);
   const [search, setSearch] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<RawMatch | null>(null);
+  const [liveCount, setLiveCount] = useState(0);
 
-  // ⭐ Écouter les favoris en temps réel
+  // Favoris
   useEffect(() => {
     const unsub = subscribeFavorites(userEmail, setFavorites);
     return () => unsub();
@@ -43,6 +44,16 @@ export default function MatchList({ userEmail }: MatchListProps) {
     try {
       const data = await fetchLiveScores();
       setGroups(data);
+      // Compter les matchs live
+      let live = 0;
+      data.forEach((c) =>
+        c.leagues.forEach((l) =>
+          l.matches.forEach((m) => {
+            if (isLiveStatus(m.status)) live++;
+          })
+        )
+      );
+      setLiveCount(live);
     } catch (e: any) {
       setError(e.message || 'Erreur');
     }
@@ -50,34 +61,33 @@ export default function MatchList({ userEmail }: MatchListProps) {
     setRefreshing(false);
   }, []);
 
- useEffect(() => {
-  loadScores();
-
-  const subscription = AppState.addEventListener('change', (state) => {
-    if (state === 'active') {
-      loadScores(true); // silent reload
-    }
-  });
-
-  return () => subscription.remove();
-}, [loadScores]);
+  // ✅ Refresh intelligent (AppState au lieu de setInterval)
+  useEffect(() => {
+    loadScores();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') loadScores(true);
+    });
+    return () => sub.remove();
+  }, [loadScores]);
 
   const onRefresh = () => {
     setRefreshing(true);
     loadScores(true);
   };
 
-  // 🎯 Filtrage
+  // 🔍 Filtrage
   const filterMatches = (matches: RawMatch[]): RawMatch[] => {
     let filtered = matches;
 
-    if (filter === 'live') {
+    if (tab === 'live') {
       filtered = filtered.filter((m) => isLiveStatus(m.status));
-    } else if (filter === 'favorites') {
+    } else if (tab === 'finished') {
       filtered = filtered.filter(
-        (m) =>
-          favorites.includes(m.localteam) ||
-          favorites.includes(m.visitorteam)
+        (m) => m.status === 'FT' || parseInt(m.status, 10) >= 90
+      );
+    } else if (tab === 'upcoming') {
+      filtered = filtered.filter(
+        (m) => m.status === 'NS' || m.status === '' || m.status === 'Postp.'
       );
     }
 
@@ -95,7 +105,6 @@ export default function MatchList({ userEmail }: MatchListProps) {
     return filtered;
   };
 
-  // Groupes visibles
   const visibleGroups = useMemo(() => {
     return groups
       .map((c) => ({
@@ -105,7 +114,7 @@ export default function MatchList({ userEmail }: MatchListProps) {
           .filter((l) => l.matches.length > 0),
       }))
       .filter((c) => c.leagues.length > 0);
-  }, [groups, filter, favorites, search]);
+  }, [groups, tab, favorites, search]);
 
   const totalVisible = visibleGroups.reduce(
     (sum, c) => sum + c.leagues.reduce((s, l) => s + l.matches.length, 0),
@@ -123,6 +132,8 @@ export default function MatchList({ userEmail }: MatchListProps) {
 
   const renderMatch = (match: RawMatch, index: number) => {
     const live = isLiveStatus(match.status);
+    const finished =
+      match.status === 'FT' || parseInt(match.status, 10) >= 90;
     const parts = match.scoretime?.split('-').map((s) => s.trim()) || ['-', '-'];
     const homeScore = parts[0] || '-';
     const awayScore = parts[1] || '-';
@@ -132,16 +143,33 @@ export default function MatchList({ userEmail }: MatchListProps) {
     return (
       <TouchableOpacity
         key={match.id || index}
-        style={styles.matchCard}
+        style={[styles.matchCard, live && styles.matchCardLive]}
         activeOpacity={0.7}
         onPress={() => setSelectedMatch(match)}
       >
-        {/* Header statut */}
+        {/* Bande latérale colorée pour live */}
+        {live && <View style={styles.liveBar} />}
+
+        {/* Header */}
         <View style={styles.matchHeader}>
-          <View style={[styles.statusBadge, live && styles.statusBadgeLive]}>
-            <Text style={[styles.statusText, live && styles.statusTextLive]}>
-              {getStatusLabel(match.status)}
-            </Text>
+          <View style={styles.headerLeft}>
+            <View
+              style={[
+                styles.statusBadge,
+                live && styles.statusBadgeLive,
+                finished && styles.statusBadgeFinished,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.statusText,
+                  live && styles.statusTextLive,
+                  finished && styles.statusTextFinished,
+                ]}
+              >
+                {getStatusLabel(match.status)}
+              </Text>
+            </View>
           </View>
           <Text style={styles.matchTime}>{formatTime(match.time)}</Text>
         </View>
@@ -156,12 +184,11 @@ export default function MatchList({ userEmail }: MatchListProps) {
             >
               <Ionicons
                 name={homeFav ? 'star' : 'star-outline'}
-                size={18}
+                size={16}
                 color={homeFav ? '#FFD700' : '#444'}
-                style={styles.starIcon}
               />
             </TouchableOpacity>
-            <TeamLogo name={match.localteam} size={32} />
+            <TeamLogo name={match.localteam} size={30} />
             <Text style={styles.teamName} numberOfLines={1}>
               {match.localteam}
             </Text>
@@ -171,13 +198,25 @@ export default function MatchList({ userEmail }: MatchListProps) {
             </View>
           </View>
 
-          {/* Score central */}
+          {/* Score */}
           <View style={[styles.scoreBox, live && styles.scoreBoxLive]}>
-            <Text style={[styles.scoreText, live && styles.scoreTextLive]}>
+            <Text
+              style={[
+                styles.scoreText,
+                live && styles.scoreTextLive,
+                finished && styles.scoreTextFinished,
+              ]}
+            >
               {homeScore}
             </Text>
             <Text style={styles.scoreSeparator}>-</Text>
-            <Text style={[styles.scoreText, live && styles.scoreTextLive]}>
+            <Text
+              style={[
+                styles.scoreText,
+                live && styles.scoreTextLive,
+                finished && styles.scoreTextFinished,
+              ]}
+            >
               {awayScore}
             </Text>
           </View>
@@ -191,16 +230,15 @@ export default function MatchList({ userEmail }: MatchListProps) {
             <Text style={[styles.teamName, styles.teamNameRight]} numberOfLines={1}>
               {match.visitorteam}
             </Text>
-            <TeamLogo name={match.visitorteam} size={32} />
+            <TeamLogo name={match.visitorteam} size={30} />
             <TouchableOpacity
               onPress={() => onToggleFavorite(match.visitorteam)}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Ionicons
                 name={awayFav ? 'star' : 'star-outline'}
-                size={18}
+                size={16}
                 color={awayFav ? '#FFD700' : '#444'}
-                style={styles.starIcon}
               />
             </TouchableOpacity>
           </View>
@@ -231,26 +269,30 @@ export default function MatchList({ userEmail }: MatchListProps) {
         </View>
       )}
 
-      {/* Filtres */}
-      <View style={styles.filterRow}>
+      {/* Tabs sections */}
+      <View style={styles.tabRow}>
         {[
-          { key: 'live', label: '🔴 Live' },
-          { key: 'all', label: '📋 Tous' },
-          { key: 'favorites', label: '⭐ Favoris' },
-        ].map((f) => (
+          { key: 'all', label: 'Tous' },
+          { key: 'live', label: '🔴 Live', badge: liveCount },
+          { key: 'finished', label: 'Terminés' },
+          { key: 'upcoming', label: 'À venir' },
+        ].map((t) => (
           <TouchableOpacity
-            key={f.key}
-            style={[styles.filterBtn, filter === f.key && styles.filterBtnActive]}
-            onPress={() => setFilter(f.key as Filter)}
+            key={t.key}
+            style={[styles.tabBtn, tab === t.key && styles.tabBtnActive]}
+            onPress={() => setTab(t.key as Tab)}
           >
             <Text
-              style={[
-                styles.filterText,
-                filter === f.key && styles.filterTextActive,
-              ]}
+              style={[styles.tabText, tab === t.key && styles.tabTextActive]}
+              numberOfLines={1}
             >
-              {f.label}
+              {t.label}
             </Text>
+            {t.badge ? (
+              <View style={styles.tabBadge}>
+                <Text style={styles.tabBadgeText}>{t.badge}</Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
         ))}
         <TouchableOpacity
@@ -259,22 +301,22 @@ export default function MatchList({ userEmail }: MatchListProps) {
         >
           <Ionicons
             name={showSearch ? 'close' : 'search'}
-            size={20}
+            size={18}
             color="#39FF14"
           />
         </TouchableOpacity>
       </View>
 
-      {/* Loading */}
+      {/* Contenu */}
       {loading && !refreshing ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#39FF14" />
-          <Text style={styles.loadingText}>Chargement des scores...</Text>
+          <Text style={styles.loadingText}>Chargement...</Text>
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Ionicons name="warning" size={60} color="#FF3366" />
-          <Text style={styles.emptyText}>Erreur de connexion</Text>
+          <Text style={styles.emptyText}>Erreur</Text>
           <Text style={styles.emptySubtext}>{error}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={() => loadScores()}>
             <Text style={styles.retryText}>Réessayer</Text>
@@ -282,22 +324,12 @@ export default function MatchList({ userEmail }: MatchListProps) {
         </View>
       ) : totalVisible === 0 ? (
         <View style={styles.center}>
-          <Ionicons
-            name={filter === 'favorites' ? 'star-outline' : 'football-outline'}
-            size={60}
-            color="#333"
-          />
-          <Text style={styles.emptyText}>
-            {filter === 'favorites'
-              ? 'Aucun favori'
-              : filter === 'live'
-              ? 'Aucun match en direct'
-              : 'Aucun match'}
-          </Text>
+          <Ionicons name="football-outline" size={60} color="#333" />
+          <Text style={styles.emptyText}>Aucun match</Text>
           <Text style={styles.emptySubtext}>
-            {filter === 'favorites'
-              ? 'Appuie sur ⭐ pour suivre une équipe'
-              : 'Tire vers le bas pour rafraîchir'}
+            {tab === 'live'
+              ? 'Aucun match en direct actuellement'
+              : 'Essaie un autre filtre'}
           </Text>
         </View>
       ) : (
@@ -319,14 +351,14 @@ export default function MatchList({ userEmail }: MatchListProps) {
           {visibleGroups.map((group, ci) => (
             <View key={`c-${ci}`} style={styles.countryBox}>
               <View style={styles.countryHeader}>
-                <Ionicons name="globe-outline" size={14} color="#666" />
+                <Ionicons name="globe-outline" size={12} color="#666" />
                 <Text style={styles.countryTitle}>{group.country}</Text>
               </View>
 
               {group.leagues.map((league, li) => (
                 <View key={`l-${li}`} style={styles.leagueBox}>
                   <View style={styles.leagueHeader}>
-                    <Ionicons name="trophy" size={12} color="#39FF14" />
+                    <Ionicons name="trophy" size={11} color="#39FF14" />
                     <Text style={styles.leagueTitle}>{league.league}</Text>
                   </View>
                   {league.matches.map(renderMatch)}
@@ -334,12 +366,10 @@ export default function MatchList({ userEmail }: MatchListProps) {
               ))}
             </View>
           ))}
-
-          <View style={{ height: 30 }} />
+          <View style={{ height: 100 }} />
         </ScrollView>
       )}
 
-      {/* 📊 Modal Détail Match */}
       <MatchDetail
         visible={!!selectedMatch}
         matchId={selectedMatch?.id || null}
@@ -355,103 +385,129 @@ export default function MatchList({ userEmail }: MatchListProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 15 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1 },
+
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#1c1c1c', borderRadius: 12,
+    paddingHorizontal: 15, paddingVertical: 10,
+    marginHorizontal: 15, marginBottom: 12,
+    borderWidth: 1, borderColor: '#333',
+  },
+  searchInput: { flex: 1, color: '#fff', fontSize: 14 },
+
+  tabRow: {
+    flexDirection: 'row', gap: 6, marginBottom: 15,
+    paddingHorizontal: 15, alignItems: 'center',
+  },
+  tabBtn: {
+    flex: 1, paddingVertical: 8, paddingHorizontal: 6,
+    borderRadius: 10, backgroundColor: '#1c1c1c',
+    borderWidth: 1, borderColor: '#333',
+    alignItems: 'center', flexDirection: 'row',
+    justifyContent: 'center', gap: 4,
+  },
+  tabBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
+  tabText: { color: '#888', fontSize: 11, fontWeight: '600' },
+  tabTextActive: { color: '#000' },
+  tabBadge: {
+    backgroundColor: '#FF3366', borderRadius: 8,
+    paddingHorizontal: 5, paddingVertical: 1, minWidth: 18,
+    alignItems: 'center',
+  },
+  tabBadgeText: { color: '#fff', fontSize: 9, fontWeight: 'bold' },
+  iconBtn: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333',
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },
   loadingText: { color: '#39FF14', marginTop: 10 },
   emptyText: { color: '#666', fontSize: 18, marginTop: 15, fontWeight: '600' },
-  emptySubtext: { color: '#444', fontSize: 14, marginTop: 5, textAlign: 'center' },
+  emptySubtext: { color: '#444', fontSize: 13, marginTop: 5, textAlign: 'center' },
   retryBtn: {
     marginTop: 20, backgroundColor: '#39FF14',
     paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
   },
   retryText: { color: '#000', fontWeight: 'bold' },
 
-  searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#1c1c1c', borderRadius: 12,
-    paddingHorizontal: 15, paddingVertical: 10,
-    marginBottom: 12, borderWidth: 1, borderColor: '#333',
-  },
-  searchInput: { flex: 1, color: '#fff', fontSize: 15 },
-
-  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 15, alignItems: 'center' },
-  filterBtn: {
-    flex: 1, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333',
-    alignItems: 'center',
-  },
-  filterBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
-  filterText: { color: '#888', fontSize: 12, fontWeight: '600' },
-  filterTextActive: { color: '#000' },
-  iconBtn: {
-    width: 42, height: 42, borderRadius: 10,
-    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333',
-    justifyContent: 'center', alignItems: 'center',
-  },
-
   totalCount: {
     color: '#666', fontSize: 12, marginBottom: 12,
     textAlign: 'center', fontStyle: 'italic',
+    paddingHorizontal: 15,
   },
 
   countryBox: { marginBottom: 20 },
   countryHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginBottom: 8, paddingHorizontal: 15,
   },
   countryTitle: {
-    color: '#aaa', fontSize: 12, fontWeight: 'bold',
-    letterSpacing: 1, textTransform: 'uppercase',
+    color: '#aaa', fontSize: 11, fontWeight: 'bold',
+    letterSpacing: 1.2, textTransform: 'uppercase',
   },
 
-  leagueBox: { marginBottom: 12, paddingLeft: 6 },
+  leagueBox: { marginBottom: 12, paddingHorizontal: 15 },
   leagueHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     marginBottom: 8, paddingBottom: 4,
-    borderBottomWidth: 1, borderBottomColor: '#222',
+    borderBottomWidth: 1, borderBottomColor: '#1f1f1f',
   },
-  leagueTitle: { color: '#39FF14', fontSize: 12, fontWeight: 'bold' },
+  leagueTitle: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
 
   matchCard: {
-    backgroundColor: '#1a1a1a', padding: 12, borderRadius: 12,
-    marginBottom: 8, borderWidth: 1, borderColor: '#2a2a2a',
+    backgroundColor: '#171717', padding: 12, borderRadius: 12,
+    marginBottom: 8, borderWidth: 1, borderColor: '#262626',
+    overflow: 'hidden',
   },
+  matchCardLive: { borderColor: '#39FF1440' },
+
+  liveBar: {
+    position: 'absolute', left: 0, top: 0, bottom: 0,
+    width: 3, backgroundColor: '#39FF14',
+  },
+
   matchHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 10,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusBadge: {
     paddingHorizontal: 8, paddingVertical: 3,
-    backgroundColor: '#222', borderRadius: 6,
+    backgroundColor: '#262626', borderRadius: 6,
   },
-  statusBadgeLive: { backgroundColor: '#39FF1422' },
-  statusText: { color: '#888', fontSize: 10, fontWeight: 'bold' },
+  statusBadgeLive: { backgroundColor: '#39FF1425' },
+  statusBadgeFinished: { backgroundColor: '#33333380' },
+  statusText: { color: '#999', fontSize: 10, fontWeight: 'bold' },
   statusTextLive: { color: '#39FF14' },
+  statusTextFinished: { color: '#666' },
   matchTime: { color: '#666', fontSize: 11, fontWeight: '600' },
 
   teamsContainer: { gap: 8 },
   teamRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  starIcon: { padding: 2 },
-  teamName: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '500' },
+  teamName: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '500' },
   teamNameRight: { textAlign: 'right' },
-  cardsBox: { flexDirection: 'row', gap: 3, minWidth: 20 },
+  cardsBox: { flexDirection: 'row', gap: 3, minWidth: 18 },
   yellowCard: {
-    width: 8, height: 11, borderRadius: 2, backgroundColor: '#FFD700',
+    width: 7, height: 10, borderRadius: 2, backgroundColor: '#FFD700',
   },
   redCard: {
-    width: 8, height: 11, borderRadius: 2, backgroundColor: '#FF3366',
+    width: 7, height: 10, borderRadius: 2, backgroundColor: '#FF3366',
   },
 
   scoreBox: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#0a0a0a', paddingVertical: 8,
+    backgroundColor: '#0a0a0a', paddingVertical: 6,
     borderRadius: 8, gap: 12,
-    borderWidth: 1, borderColor: '#2a2a2a',
+    borderWidth: 1, borderColor: '#222',
   },
   scoreBoxLive: { borderColor: '#39FF1444' },
   scoreText: {
-    color: '#fff', fontSize: 22, fontWeight: 'bold',
-    minWidth: 30, textAlign: 'center',
+    color: '#fff', fontSize: 20, fontWeight: 'bold',
+    minWidth: 26, textAlign: 'center',
   },
   scoreTextLive: { color: '#39FF14' },
-  scoreSeparator: { color: '#555', fontSize: 16 },
+  scoreTextFinished: { color: '#999' },
+  scoreSeparator: { color: '#555', fontSize: 14 },
 });
