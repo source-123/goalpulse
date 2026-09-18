@@ -12,6 +12,7 @@ import MatchList from './MatchList';
 import Standings from './Standings';
 import RoomsScreen from './RoomsScreen';
 import RoomDetail from './RoomDetail';
+import ProfileScreen from './ProfileScreen';
 import { logout } from './authConfig';
 import { saveUserProfile } from './userService';
 import { auth } from './firebaseConfig';
@@ -24,7 +25,7 @@ interface User {
   name?: string | null;
 }
 
-type Tab = 'matches' | 'standings' | 'rooms';
+type Tab = 'matches' | 'standings' | 'rooms' | 'profile';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -35,7 +36,6 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
-        console.log('✅ Session restaurée:', firebaseUser.email);
         setUser({
           email: firebaseUser.email || '',
           isSignup: false,
@@ -53,7 +53,6 @@ export default function App() {
   useEffect(() => {
     if (user?.email) {
       saveUserProfile(user.email, user.name || null).catch(console.error);
-      // 🔔 Enregistrer pour les notifications
       registerForPushNotifications(user.email).catch(console.error);
     }
   }, [user]);
@@ -62,8 +61,7 @@ export default function App() {
     Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
       { text: 'Annuler', style: 'cancel' },
       {
-        text: 'Déconnexion',
-        style: 'destructive',
+        text: 'Déconnexion', style: 'destructive',
         onPress: async () => {
           await logout();
           setUser(null);
@@ -116,8 +114,9 @@ export default function App() {
 
   const TABS: Array<{ key: Tab; icon: any; activeIcon: any; label: string }> = [
     { key: 'matches', icon: 'football-outline', activeIcon: 'football', label: 'Matchs' },
-    { key: 'standings', icon: 'stats-chart-outline', activeIcon: 'stats-chart', label: 'Classements' },
+    { key: 'standings', icon: 'stats-chart-outline', activeIcon: 'stats-chart', label: 'Class.' },
     { key: 'rooms', icon: 'game-controller-outline', activeIcon: 'game-controller', label: 'Salons' },
+    { key: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'Profil' },
   ];
 
   return (
@@ -150,6 +149,9 @@ export default function App() {
             userName={displayName}
             onOpenRoom={(code, name) => setOpenRoom({ code, name })}
           />
+        )}
+        {tab === 'profile' && (
+          <ProfileScreen userEmail={user.email} userName={displayName} />
         )}
       </View>
 
@@ -195,7 +197,6 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
-
   splashBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   splashImage: { width: 140, height: 140, borderRadius: 70 },
   splashTitle: {
@@ -254,8 +255,8 @@ const styles = StyleSheet.create({
   },
   navItemContent: {
     flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 6, zIndex: 1,
+    justifyContent: 'center', gap: 5, zIndex: 1,
   },
-  navLabel: { color: '#555', fontSize: 11, fontWeight: '600' },
+  navLabel: { color: '#555', fontSize: 10, fontWeight: '600' },
   navLabelActive: { color: '#000', fontWeight: 'bold' },
 });
