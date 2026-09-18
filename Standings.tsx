@@ -7,16 +7,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchStandings } from './liveScoreService';
 import TeamLogo from './TeamLogo';
 
-// Compétitions disponibles (plan gratuit Football-Data.org)
 const COMPETITIONS = [
-  { code: 'PL', name: 'Premier League', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
-  { code: 'PD', name: 'La Liga', country: '🇪🇸' },
-  { code: 'SA', name: 'Serie A', country: '🇮🇹' },
-  { code: 'BL1', name: 'Bundesliga', country: '🇩🇪' },
-  { code: 'FL1', name: 'Ligue 1', country: '🇫🇷' },
-  { code: 'CL', name: 'Champions League', country: '🇪🇺' },
-  { code: 'DED', name: 'Eredivisie', country: '🇳🇱' },
-  { code: 'PPL', name: 'Primeira Liga', country: '🇵🇹' },
+  { code: 'PL', name: 'Premier League', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+  { code: 'PD', name: 'La Liga', flag: '🇪🇸' },
+  { code: 'SA', name: 'Serie A', flag: '🇮🇹' },
+  { code: 'BL1', name: 'Bundesliga', flag: '🇩🇪' },
+  { code: 'FL1', name: 'Ligue 1', flag: '🇫🇷' },
+  { code: 'CL', name: 'Champions League', flag: '🇪🇺' },
+  { code: 'DED', name: 'Eredivisie', flag: '🇳🇱' },
+  { code: 'PPL', name: 'Primeira Liga', flag: '🇵🇹' },
+  { code: 'BSA', name: 'Brasileirão', flag: '🇧🇷' },
 ];
 
 interface Row {
@@ -39,17 +39,15 @@ export default function Standings() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [competitionName, setCompetitionName] = useState('');
+  const [season, setSeason] = useState('');
 
   const load = async (code: string, silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(
-        `https://goalpulse-aciq.onrender.com/api/standings/${code}`
-      );
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error);
-      setRows(json.data || []);
-      setCompetitionName(json.competition || code);
+      const result = await fetchStandings(code);
+      setRows(result.rows);
+      setCompetitionName(result.competition);
+      setSeason(result.season);
     } catch (e: any) {
       Alert.alert('Erreur', e.message);
       setRows([]);
@@ -68,15 +66,15 @@ export default function Standings() {
   };
 
   const getPosColor = (pos: number, total: number): string => {
-    if (pos <= 4) return '#39FF14'; // Champions League
-    if (pos <= 6) return '#00BFFF'; // Europa League
-    if (pos >= total - 2) return '#FF3366'; // Relégation
+    if (pos <= 4) return '#39FF14';
+    if (pos <= 6) return '#00BFFF';
+    if (pos >= total - 2) return '#FF3366';
     return '#666';
   };
 
   return (
     <View style={styles.container}>
-      {/* Sélecteur de compétition */}
+      {/* Sélecteur compétition */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -92,13 +90,12 @@ export default function Standings() {
             ]}
             onPress={() => setSelected(c.code)}
           >
-            <Text style={styles.compCountry}>{c.country}</Text>
+            <Text style={styles.compFlag}>{c.flag}</Text>
             <Text
               style={[
                 styles.compText,
                 selected === c.code && styles.compTextActive,
               ]}
-              numberOfLines={1}
             >
               {c.code}
             </Text>
@@ -106,11 +103,12 @@ export default function Standings() {
         ))}
       </ScrollView>
 
-      {/* Titre compétition */}
+      {/* Titre compétition + saison */}
       {competitionName ? (
         <View style={styles.titleRow}>
           <Ionicons name="trophy" size={18} color="#39FF14" />
           <Text style={styles.titleText}>{competitionName}</Text>
+          {season ? <Text style={styles.seasonText}>{season}</Text> : null}
         </View>
       ) : null}
 
@@ -124,9 +122,7 @@ export default function Standings() {
         <View style={styles.center}>
           <Ionicons name="trophy-outline" size={60} color="#333" />
           <Text style={styles.emptyText}>Aucun classement</Text>
-          <Text style={styles.emptySubtext}>
-            Essaie une autre compétition
-          </Text>
+          <Text style={styles.emptySubtext}>Essaie une autre compétition</Text>
         </View>
       ) : (
         <ScrollView
@@ -156,9 +152,7 @@ export default function Standings() {
               <View
                 style={[
                   styles.posBar,
-                  {
-                    backgroundColor: getPosColor(row.position, rows.length),
-                  },
+                  { backgroundColor: getPosColor(row.position, rows.length) },
                 ]}
               />
               <Text style={[styles.td, styles.thPos, styles.tdBold]}>
@@ -178,7 +172,7 @@ export default function Standings() {
                 style={[
                   styles.td,
                   styles.thStat,
-                  { color: row.goalDiff > 0 ? '#39FF14' : '#666' },
+                  { color: row.goalDiff > 0 ? '#39FF14' : row.goalDiff < 0 ? '#FF3366' : '#666' },
                 ]}
               >
                 {row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}
@@ -189,7 +183,7 @@ export default function Standings() {
             </View>
           ))}
 
-          <View style={{ height: 30 }} />
+          <View style={{ height: 100 }} />
         </ScrollView>
       )}
     </View>
@@ -213,7 +207,7 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
   compChipActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
-  compCountry: { fontSize: 14 },
+  compFlag: { fontSize: 13 },
   compText: { color: '#888', fontSize: 12, fontWeight: 'bold' },
   compTextActive: { color: '#000' },
 
@@ -224,7 +218,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     marginBottom: 12,
   },
-  titleText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  titleText: { color: '#fff', fontSize: 16, fontWeight: 'bold', flex: 1 },
+  seasonText: { color: '#666', fontSize: 12, fontStyle: 'italic' },
 
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#39FF14', marginTop: 10 },
