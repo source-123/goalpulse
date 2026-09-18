@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text, TouchableOpacity, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import LoginScreen from './LoginScreen';
@@ -35,7 +35,8 @@ export default function App() {
     Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
       { text: 'Annuler', style: 'cancel' },
       {
-        text: 'Déconnexion', style: 'destructive',
+        text: 'Déconnexion',
+        style: 'destructive',
         onPress: async () => {
           await logout();
           setUser(null);
@@ -55,7 +56,6 @@ export default function App() {
 
   const displayName = user.name || user.email.split('@')[0];
 
-  // Si un salon est ouvert → plein écran
   if (openRoom) {
     return (
       <LinearGradient
@@ -73,6 +73,17 @@ export default function App() {
     );
   }
 
+  const TABS: Array<{
+    key: Tab;
+    icon: any;
+    activeIcon: any;
+    label: string;
+  }> = [
+    { key: 'matches', icon: 'football-outline', activeIcon: 'football', label: 'Matchs' },
+    { key: 'standings', icon: 'stats-chart-outline', activeIcon: 'stats-chart', label: 'Classements' },
+    { key: 'rooms', icon: 'game-controller-outline', activeIcon: 'game-controller', label: 'Salons' },
+  ];
+
   return (
     <LinearGradient
       colors={['#0a0a0a', '#0f0f0f', '#151515']}
@@ -81,7 +92,7 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.logoCircle}>
-            <Ionicons name="football" size={20} color="#39FF14" />
+            <Ionicons name="football" size={18} color="#39FF14" />
           </View>
           <View>
             <Text style={styles.headerTitle}>GoalPulse</Text>
@@ -89,11 +100,11 @@ export default function App() {
           </View>
         </View>
         <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-          <Ionicons name="log-out-outline" size={20} color="#39FF14" />
+          <Ionicons name="log-out-outline" size={18} color="#39FF14" />
         </TouchableOpacity>
       </View>
 
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, paddingBottom: 100 }}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
         {tab === 'rooms' && (
@@ -105,33 +116,44 @@ export default function App() {
         )}
       </View>
 
-      <View style={styles.bottomTabs}>
-        {[
-          { key: 'matches', icon: 'football', label: 'Matchs' },
-          { key: 'standings', icon: 'stats-chart', label: 'Classements' },
-          { key: 'rooms', icon: 'game-controller', label: 'Salons' },
-        ].map((t) => (
-          <TouchableOpacity
-            key={t.key}
-            style={styles.bottomTab}
-            onPress={() => setTab(t.key as Tab)}
-          >
-            <Ionicons
-              name={(tab === t.key ? t.icon : `${t.icon}-outline`) as any}
-              size={22}
-              color={tab === t.key ? '#39FF14' : '#555'}
-            />
-            <Text
-              style={[
-                styles.bottomTabText,
-                tab === t.key && styles.bottomTabTextActive,
-              ]}
-            >
-              {t.label}
-            </Text>
-            {tab === t.key && <View style={styles.bottomTabIndicator} />}
-          </TouchableOpacity>
-        ))}
+      <View style={styles.navBarWrapper}>
+        <View style={styles.navBar}>
+          {TABS.map((t) => {
+            const isActive = tab === t.key;
+            return (
+              <TouchableOpacity
+                key={t.key}
+                style={[styles.navItem, isActive && styles.navItemActive]}
+                onPress={() => setTab(t.key)}
+                activeOpacity={0.7}
+              >
+                {isActive && (
+                  <LinearGradient
+                    colors={['#39FF14', '#2BC40F']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.activePill}
+                  />
+                )}
+                <View style={styles.navItemContent}>
+                  <Ionicons
+                    name={isActive ? t.activeIcon : t.icon}
+                    size={20}
+                    color={isActive ? '#000' : '#555'}
+                  />
+                  <Text
+                    style={[
+                      styles.navLabel,
+                      isActive && styles.navLabelActive,
+                    ]}
+                  >
+                    {t.label}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
 
       <StatusBar style="light" />
@@ -141,42 +163,99 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
+
   header: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', paddingHorizontal: 20, marginBottom: 15,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 15,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   logoCircle: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#111', borderWidth: 1.5, borderColor: '#39FF14',
-    justifyContent: 'center', alignItems: 'center',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#111',
+    borderWidth: 1.5,
+    borderColor: '#39FF14',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff', letterSpacing: 0.5 },
-  welcome: { color: '#39FF14', fontSize: 11, marginTop: 1, maxWidth: 180 },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  welcome: {
+    color: '#39FF14',
+    fontSize: 11,
+    marginTop: 1,
+    maxWidth: 180,
+  },
   logoutBtn: {
-    width: 40, height: 40, borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: '#1c1c1c',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
   },
 
-  bottomTabs: {
+  // 🎨 Barre flottante FIXE en bas
+  navBarWrapper: {
+    position: 'absolute',
+    bottom: Platform.OS === 'android' ? 20 : 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  navBar: {
     flexDirection: 'row',
     backgroundColor: '#0f0f0f',
-    borderTopWidth: 1,
-    borderTopColor: '#1f1f1f',
-    paddingTop: 8,
-    paddingBottom: 25,
+    borderRadius: 30,
+    padding: 5,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    width: '100%',
+    maxWidth: 400,
   },
-  bottomTab: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    gap: 3, position: 'relative',
+  navItem: {
+    flex: 1,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
   },
-  bottomTabText: { color: '#555', fontSize: 10, fontWeight: '600' },
-  bottomTabTextActive: { color: '#39FF14' },
-  bottomTabIndicator: {
-    position: 'absolute', top: -9,
-    width: 30, height: 2,
-    backgroundColor: '#39FF14', borderRadius: 1,
+  navItemActive: {},
+  activePill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 26,
+  },
+  navItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    zIndex: 1,
+  },
+  navLabel: {
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  navLabelActive: {
+    color: '#000',
+    fontWeight: 'bold',
   },
 });

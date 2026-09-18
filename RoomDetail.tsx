@@ -27,6 +27,20 @@ interface Props {
 }
 
 type Tab = 'matches' | 'bets' | 'leaderboard';
+type PickerFilter = 'all' | 'live' | 'upcoming' | 'finished';
+
+// 🔍 Type de statut
+const getMatchType = (status: string): 'live' | 'upcoming' | 'finished' => {
+  if (!status) return 'upcoming';
+  if (status === 'HT' || status === 'LIVE') return 'live';
+  if (status === 'FT') return 'finished';
+  const num = parseInt(status, 10);
+  if (!isNaN(num)) {
+    if (num >= 90) return 'finished';
+    if (num > 0 && num < 90) return 'live';
+  }
+  return 'upcoming';
+};
 
 export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('matches');
@@ -36,6 +50,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
   const [allGroups, setAllGroups] = useState<CountryGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
+  const [pickerFilter, setPickerFilter] = useState<PickerFilter>('live');
   const [selectedMatch, setSelectedMatch] = useState<SelectedMatch | null>(null);
   const [homeScore, setHomeScore] = useState('');
   const [awayScore, setAwayScore] = useState('');
@@ -67,22 +82,58 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
     [members, predictions]
   );
 
-  // ⭐ TOUS les matchs non encore ajoutés
-  const upcomingGroups = useMemo(() => {
-    return allGroups
-      .map((c) => ({
-        ...c,
-        leagues: c.leagues
-          .map((l) => ({
-            ...l,
-            matches: l.matches.filter(
-              (m) => !selectedMatches.find((sm) => sm.matchId === m.id)
-            ),
-          }))
-          .filter((l) => l.matches.length > 0),
-      }))
-      .filter((c) => c.leagues.length > 0);
+  // ⭐ Tous les matchs non encore ajoutés, filtrés selon pickerFilter
+  const availableMatches = useMemo(() => {
+    const all: RawMatch[] = [];
+    allGroups.forEach((c) => {
+      c.leagues.forEach((l) => {
+        l.matches.forEach((m) => {
+          if (!selectedMatches.find((sm) => sm.matchId === m.id)) {
+            all.push({ ...m, country: c.country });
+          }
+        });
+      });
+    });
+
+    // Filtrer selon le tab du picker
+    const filtered = pickerFilter === 'all'
+      ? all
+      : all.filter((m) => getMatchType(m.status) === pickerFilter);
+
+    // Trier : live en premier, puis upcoming, puis finished
+    const order = { live: 0, upcoming: 1, finished: 2 };
+    return filtered.sort((a, b) => {
+      const oa = order[getMatchType(a.status)];
+      const ob = order[getMatchType(b.status)];
+      if (oa !== ob) return oa - ob;
+      return (a.time || '').localeCompare(b.time || '');
+    });
+  }, [allGroups, selectedMatches, pickerFilter]);
+
+  // Compteurs
+  const counts = useMemo(() => {
+    const all: RawMatch[] = [];
+    allGroups.forEach((c) => c.leagues.forEach((l) => l.matches.forEach((m) => {
+      if (!selectedMatches.find((sm) => sm.matchId === m.id)) all.push(m);
+    })));
+    return {
+      all: all.length,
+      live: all.filter((m) => getMatchType(m.status) === 'live').length,
+      upcoming: all.filter((m) => getMatchType(m.status) === 'upcoming').length,
+      finished: all.filter((m) => getMatchType(m.status) === 'finished').length,
+    };
   }, [allGroups, selectedMatches]);
+
+  // Grouper par pays pour l'affichage
+  const groupedAvailable = useMemo(() => {
+    const map: Record<string, RawMatch[]> = {};
+    availableMatches.forEach((m) => {
+      const c = m.country || 'Autre';
+      if (!map[c]) map[c] = [];
+      map[c].push(m);
+    });
+    return map;
+  }, [availableMatches]);
 
   const handleAddMatch = async (match: RawMatch) => {
     try {
@@ -259,18 +310,33 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
             ) : (
               selectedMatches.map((sm) => {
                 const hasBet = !!myPreds[sm.matchId];
+                const type = getMatchType(sm.matchInfo.status);
                 return (
                   <View key={sm.matchId} style={styles.matchCard}>
                     <View style={styles.matchHeader}>
                       <Text style={styles.leagueName}>{sm.matchInfo.leaguename}</Text>
-                      {isCreator && (
-                        <TouchableOpacity
-                          onPress={() => handleRemoveMatch(sm)}
-                          style={styles.actionIconBtn}
-                        >
-                          <Ionicons name="trash-outline" size={16} color="#FF3366" />
-                        </TouchableOpacity>
-                      )}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {type === 'live' && (
+                          <View style={styles.liveBadge}>
+                            <Text style={styles.liveBadgeText}>
+                              🔴 {sm.matchInfo.status}'
+                            </Text>
+                          </View>
+                        )}
+                        {type === 'finished' && (
+                          <View style={styles.finishedBadge}>
+                            <Text style={styles.finishedBadgeText}>✅ Terminé</Text>
+                          </View>
+                        )}
+                        {isCreator && (
+                          <TouchableOpacity
+                            onPress={() => handleRemoveMatch(sm)}
+                            style={styles.actionIconBtn}
+                          >
+                            <Ionicons name="trash-outline" size={14} color="#FF3366" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
 
                     <View style={styles.matchTeams}>
@@ -370,7 +436,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
         <View style={{ height: 60 }} />
       </ScrollView>
 
-      {/* Picker matchs */}
+      {/* ⭐ Picker amélioré */}
       <Modal visible={showPicker} animationType="slide" transparent>
         <View style={styles.pickerOverlay}>
           <View style={styles.pickerSheet}>
@@ -380,49 +446,132 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                 <Ionicons name="close" size={26} color="#888" />
               </TouchableOpacity>
             </View>
+
+            {/* Filtres du picker */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.pickerFiltersScroll}
+              contentContainerStyle={styles.pickerFiltersRow}
+            >
+              {[
+                { key: 'live', label: `🔴 Live (${counts.live})` },
+                { key: 'upcoming', label: `⏰ À venir (${counts.upcoming})` },
+                { key: 'finished', label: `✅ Terminés (${counts.finished})` },
+                { key: 'all', label: `📋 Tous (${counts.all})` },
+              ].map((f) => (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[
+                    styles.pickerFilterBtn,
+                    pickerFilter === f.key && styles.pickerFilterBtnActive,
+                  ]}
+                  onPress={() => setPickerFilter(f.key as PickerFilter)}
+                >
+                  <Text
+                    style={[
+                      styles.pickerFilterText,
+                      pickerFilter === f.key && styles.pickerFilterTextActive,
+                    ]}
+                  >
+                    {f.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {/* Liste des matchs */}
             <ScrollView style={{ flex: 1 }}>
-              {upcomingGroups.length === 0 ? (
+              {availableMatches.length === 0 ? (
                 <View style={styles.center}>
-                  <Text style={styles.emptyText}>Aucun match disponible</Text>
+                  <Ionicons name="football-outline" size={60} color="#333" />
+                  <Text style={styles.emptyText}>
+                    {pickerFilter === 'live'
+                      ? 'Aucun match en direct'
+                      : pickerFilter === 'upcoming'
+                      ? 'Aucun match à venir'
+                      : pickerFilter === 'finished'
+                      ? 'Aucun match terminé'
+                      : 'Aucun match disponible'}
+                  </Text>
+                  <Text style={styles.emptySubtext}>
+                    Change de filtre pour voir d'autres matchs
+                  </Text>
                 </View>
               ) : (
-                upcomingGroups.map((c, ci) => (
-                  <View key={ci} style={styles.countryBox}>
-                    <Text style={styles.countryTitle}>{c.country}</Text>
-                    {c.leagues.map((l, li) => (
-                      <View key={li}>
-                        <Text style={styles.leagueTitle}>{l.league}</Text>
-                        {l.matches.map((m, mi) => {
-                          const isLive = m.status === 'HT' || (parseInt(m.status, 10) > 0 && parseInt(m.status, 10) <= 90);
-                          const isFinished = m.status === 'FT' || parseInt(m.status, 10) >= 90;
-                          return (
-                            <TouchableOpacity
-                              key={mi}
-                              style={styles.pickMatchRow}
-                              onPress={() => handleAddMatch(m)}
-                            >
-                              <View style={styles.pickTime}>
-                                <Text style={styles.pickTimeText}>{formatTime(m.time)}</Text>
-                                {isLive && <Text style={styles.pickBadgeLive}>🔴</Text>}
-                                {isFinished && <Text style={styles.pickBadgeDone}>✅</Text>}
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.pickTeam} numberOfLines={1}>
-                                  {m.localteam}
+                Object.keys(groupedAvailable).map((country) => (
+                  <View key={country} style={styles.countryBox}>
+                    <View style={styles.countryHeader}>
+                      <Ionicons name="globe-outline" size={12} color="#666" />
+                      <Text style={styles.countryTitle}>{country}</Text>
+                    </View>
+                    {groupedAvailable[country].map((m, i) => {
+                      const type = getMatchType(m.status);
+                      const parts = m.scoretime?.split('-').map((s) => s.trim()) || ['-', '-'];
+
+                      return (
+                        <TouchableOpacity
+                          key={i}
+                          style={styles.pickMatchRow}
+                          onPress={() => handleAddMatch(m)}
+                          activeOpacity={0.7}
+                        >
+                          {/* Indicateur statut */}
+                          <View style={styles.pickStatusCol}>
+                            {type === 'live' && (
+                              <>
+                                <View style={styles.pickLiveDot} />
+                                <Text style={styles.pickLiveText}>{m.status}'</Text>
+                              </>
+                            )}
+                            {type === 'upcoming' && (
+                              <>
+                                <Ionicons name="time-outline" size={14} color="#00BFFF" />
+                                <Text style={styles.pickUpcomingText}>
+                                  {formatTime(m.time)}
                                 </Text>
-                                <Text style={styles.pickTeam} numberOfLines={1}>
-                                  {m.visitorteam}
-                                </Text>
-                              </View>
-                              <Ionicons name="add-circle" size={26} color="#39FF14" />
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    ))}
+                              </>
+                            )}
+                            {type === 'finished' && (
+                              <>
+                                <Ionicons name="checkmark-circle" size={14} color="#666" />
+                                <Text style={styles.pickFinishedText}>FT</Text>
+                              </>
+                            )}
+                          </View>
+
+                          {/* Équipes */}
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.pickTeam} numberOfLines={1}>
+                              {m.localteam}
+                            </Text>
+                            <Text style={styles.pickTeam} numberOfLines={1}>
+                              {m.visitorteam}
+                            </Text>
+                          </View>
+
+                          {/* Score si live ou fini */}
+                          {(type === 'live' || type === 'finished') && (
+                            <View style={styles.pickScoreBox}>
+                              <Text
+                                style={[
+                                  styles.pickScoreText,
+                                  type === 'live' && { color: '#39FF14' },
+                                ]}
+                              >
+                                {parts[0]} - {parts[1]}
+                              </Text>
+                            </View>
+                          )}
+
+                          <Ionicons name="add-circle" size={24} color="#39FF14" />
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 ))
               )}
+              <View style={{ height: 40 }} />
             </ScrollView>
           </View>
         </View>
@@ -562,8 +711,18 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 10,
   },
   leagueName: { color: '#666', fontSize: 11, flex: 1 },
+  liveBadge: {
+    backgroundColor: '#39FF1425', paddingHorizontal: 6, paddingVertical: 3,
+    borderRadius: 6,
+  },
+  liveBadgeText: { color: '#39FF14', fontSize: 9, fontWeight: 'bold' },
+  finishedBadge: {
+    backgroundColor: '#33333380', paddingHorizontal: 6, paddingVertical: 3,
+    borderRadius: 6,
+  },
+  finishedBadgeText: { color: '#999', fontSize: 9, fontWeight: 'bold' },
   actionIconBtn: {
-    width: 30, height: 30, borderRadius: 8,
+    width: 26, height: 26, borderRadius: 6,
     backgroundColor: '#FF336615',
     justifyContent: 'center', alignItems: 'center',
   },
@@ -617,32 +776,52 @@ const styles = StyleSheet.create({
   },
   pickerSheet: {
     backgroundColor: '#111', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 20, height: '85%',
+    padding: 20, height: '90%',
     borderTopWidth: 1, borderColor: '#333',
   },
   pickerHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 15,
+    alignItems: 'center', marginBottom: 12,
   },
   pickerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
 
+  pickerFiltersScroll: { maxHeight: 45, marginBottom: 15 },
+  pickerFiltersRow: { gap: 8, paddingRight: 10 },
+  pickerFilterBtn: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333',
+  },
+  pickerFilterBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
+  pickerFilterText: { color: '#888', fontSize: 12, fontWeight: '600' },
+  pickerFilterTextActive: { color: '#000' },
+
   countryBox: { marginBottom: 15 },
+  countryHeader: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
   countryTitle: {
     color: '#aaa', fontSize: 11, fontWeight: 'bold',
-    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6,
+    letterSpacing: 1, textTransform: 'uppercase',
   },
-  leagueTitle: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', marginBottom: 6 },
 
   pickMatchRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#1a1a1a', padding: 10, borderRadius: 10,
     marginBottom: 6, borderWidth: 1, borderColor: '#262626',
   },
-  pickTime: { width: 40, alignItems: 'center' },
-  pickTimeText: { color: '#39FF14', fontSize: 10, fontWeight: 'bold' },
-  pickBadgeLive: { fontSize: 8, marginTop: 1 },
-  pickBadgeDone: { fontSize: 8, marginTop: 1 },
+  pickStatusCol: {
+    width: 40, alignItems: 'center', gap: 2,
+  },
+  pickLiveDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: '#39FF14',
+  },
+  pickLiveText: { color: '#39FF14', fontSize: 9, fontWeight: 'bold' },
+  pickUpcomingText: { color: '#00BFFF', fontSize: 9, fontWeight: 'bold' },
+  pickFinishedText: { color: '#666', fontSize: 9, fontWeight: 'bold' },
   pickTeam: { color: '#fff', fontSize: 12 },
+  pickScoreBox: {
+    backgroundColor: '#0a0a0a', paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 6, minWidth: 45, alignItems: 'center',
+  },
+  pickScoreText: { color: '#999', fontSize: 12, fontWeight: 'bold' },
 
   betOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
