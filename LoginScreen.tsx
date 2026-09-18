@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator
+  KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Image,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,19 +21,27 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
-    const result = await signInWithGoogle();
-    setGoogleLoading(false);
+    try {
+      const result = await signInWithGoogle();
+      setGoogleLoading(false);
 
-    if (result.success && result.user) {
-      Alert.alert("✅ Connecté", `Bienvenue ${result.user.name || result.user.email} !`);
-      onLogin({
-        email: result.user.email || '',
-        isSignup: false,
-        google: true,
-        name: result.user.name,
-      });
-    } else if (result.error) {
-      Alert.alert("❌ Erreur Google", result.error);
+      if (result.success && result.user) {
+        Alert.alert("✅ Connecté", `Bienvenue ${result.user.name || result.user.email} !`);
+        onLogin({
+          email: result.user.email || '',
+          isSignup: false,
+          google: true,
+          name: result.user.name,
+        });
+      } else {
+        // Ne pas afficher d'alerte pour une annulation volontaire
+        if (result.error && !result.error.includes('annulée')) {
+          Alert.alert("❌ Erreur Google", result.error);
+        }
+      }
+    } catch (e: any) {
+      setGoogleLoading(false);
+      Alert.alert("Erreur", e.message || "Impossible d'ouvrir Google");
     }
   };
 
@@ -56,15 +64,18 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flex1}
+        style={{ flex: 1 }}
       >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.scroll}>
+
+          {/* 🎨 LOGO AVEC TON ICON */}
           <View style={styles.logoBox}>
             <View style={styles.iconCircle}>
-              <Ionicons name="pulse" size={42} color="#39FF14" />
+              <Image
+                source={require('./assets/icon.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
             </View>
             <Text style={styles.title}>GoalPulse</Text>
             <Text style={styles.subtitle}>
@@ -72,6 +83,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             </Text>
           </View>
 
+          {/* CHAMP EMAIL */}
           <View style={styles.inputBox}>
             <MaterialIcons name="email" size={22} color="#39FF14" style={styles.inputIcon} />
             <TextInput
@@ -85,6 +97,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             />
           </View>
 
+          {/* CHAMP MOT DE PASSE */}
           <View style={styles.inputBox}>
             <Ionicons name="lock-closed" size={22} color="#39FF14" style={styles.inputIcon} />
             <TextInput
@@ -159,17 +172,25 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1 },
-  container: { flex: 1, minHeight: '100%' as any },
+  container: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 25 },
 
   logoBox: { alignItems: 'center', marginBottom: 40 },
   iconCircle: {
-    width: 90, height: 90, borderRadius: 45,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: '#111',
-    borderWidth: 2, borderColor: '#39FF14',
-    justifyContent: 'center', alignItems: 'center',
-    boxShadow: '0px 0px 15px rgba(57, 255, 20, 0.8)',
+    borderWidth: 2,
+    borderColor: '#39FF14',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 116,
+    height: 116,
+    borderRadius: 58,
   },
   title: { fontSize: 34, fontWeight: 'bold', color: '#fff', marginTop: 15, letterSpacing: 1 },
   subtitle: { fontSize: 15, color: '#39FF14', marginTop: 5 },
@@ -185,9 +206,9 @@ const styles = StyleSheet.create({
   mainBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#39FF14', paddingVertical: 16, borderRadius: 12,
-    marginTop: 10, boxShadow: '0px 0px 12px rgba(57, 255, 20, 0.6)',
+    marginTop: 10,
   },
-  mainBtnText: { color: '#000', fontSize: 17, fontWeight: 'bold', marginLeft: 8, letterSpacing: 0.5 },
+  mainBtnText: { color: '#000', fontSize: 17, fontWeight: 'bold', marginLeft: 8 },
 
   separator: { flexDirection: 'row', alignItems: 'center', marginVertical: 25 },
   line: { flex: 1, height: 1, backgroundColor: '#333' },
@@ -197,9 +218,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#1c1c1c', paddingVertical: 15, borderRadius: 12,
     borderWidth: 1, borderColor: '#39FF14',
-    boxShadow: '0px 0px 10px rgba(57, 255, 20, 0.3)',
   },
-  googleBtnText: { color: '#fff', fontSize: 16, fontWeight: '600', marginLeft: 10, letterSpacing: 0.3 },
+  googleBtnText: { color: '#fff', fontSize: 16, fontWeight: '600', marginLeft: 10 },
 
   switchBox: { marginTop: 30, alignItems: 'center' },
   switchText: { color: '#aaa', fontSize: 14 },
