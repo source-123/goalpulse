@@ -13,6 +13,7 @@ import {
 import { getUserKey } from './userService';
 import TeamLogo from './TeamLogo';
 import { formatBetLabel, getBetType } from './betTypes';
+import LiveClock from './LiveClock';
 
 interface Props {
   code: string;
@@ -43,6 +44,22 @@ export default function RoomBets({ code, userEmail }: Props) {
       unsubP();
     };
   }, [code]);
+
+  // ⏱️ Auto-refresh des scores toutes les 30s s'il y a des matchs live
+  useEffect(() => {
+    const hasLive = Object.values(scores).some((s) => {
+      const status = s.status;
+      return status === 'HT' ||
+        (!isNaN(parseInt(status, 10)) && parseInt(status, 10) > 0 && parseInt(status, 10) < 90);
+    });
+    if (!hasLive) return;
+
+    const interval = setInterval(() => {
+      console.log('🔄 Auto-refresh scores RoomBets');
+      fetchCurrentScores().then(setScores).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [scores]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -122,11 +139,7 @@ export default function RoomBets({ code, userEmail }: Props) {
             {/* Header */}
             <View style={styles.matchHeader}>
               <Text style={styles.leagueName}>{sm.matchInfo.leaguename}</Text>
-              {isLive && (
-                <View style={styles.liveBadge}>
-                  <Text style={styles.liveBadgeText}>🔴 LIVE {actual.status}'</Text>
-                </View>
-              )}
+              {isLive && <LiveClock status={actual.status} />}
               {isFinished && (
                 <View style={styles.finishedBadge}>
                   <Text style={styles.finishedBadgeText}>✅ Terminé</Text>
@@ -247,8 +260,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 10,
   },
   leagueName: { color: '#666', fontSize: 11, flex: 1 },
-  liveBadge: { backgroundColor: '#39FF1425', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  liveBadgeText: { color: '#39FF14', fontSize: 10, fontWeight: 'bold' },
   finishedBadge: { backgroundColor: '#33333380', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   finishedBadgeText: { color: '#999', fontSize: 10, fontWeight: 'bold' },
   upcomingBadge: { backgroundColor: '#00BFFF20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
