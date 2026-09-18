@@ -1,8 +1,12 @@
 import { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
+import {
+  StyleSheet, View, Text, TouchableOpacity, Alert,
+  Platform, ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { onAuthStateChanged } from 'firebase/auth';
 import LoginScreen from './LoginScreen';
 import MatchList from './MatchList';
 import Standings from './Standings';
@@ -10,6 +14,7 @@ import RoomsScreen from './RoomsScreen';
 import RoomDetail from './RoomDetail';
 import { logout } from './authConfig';
 import { saveUserProfile } from './userService';
+import { auth } from './firebaseConfig';
 
 interface User {
   email: string;
@@ -24,7 +29,29 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
   const [openRoom, setOpenRoom] = useState<{ code: string; name: string } | null>(null);
+  const [restoring, setRestoring] = useState(true);
 
+  // 🔐 Restaurer la session au démarrage
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        console.log('✅ Session restaurée:', firebaseUser.email);
+        setUser({
+          email: firebaseUser.email || '',
+          isSignup: false,
+          google: true,
+          name: firebaseUser.displayName,
+        });
+      } else {
+        console.log('ℹ️ Aucune session active');
+        setUser(null);
+      }
+      setRestoring(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // 💾 Sauvegarder le profil quand l'utilisateur se connecte
   useEffect(() => {
     if (user?.email) {
       saveUserProfile(user.email, user.name || null).catch(console.error);
@@ -45,6 +72,26 @@ export default function App() {
     ]);
   };
 
+  // ⏳ Écran de chargement pendant la restauration de session
+  if (restoring) {
+    return (
+      <LinearGradient
+        colors={['#0a0a0a', '#0f0f0f']}
+        style={styles.container}
+      >
+        <View style={styles.splashBox}>
+          <View style={styles.splashLogo}>
+            <Ionicons name="football" size={60} color="#39FF14" />
+          </View>
+          <Text style={styles.splashTitle}>GoalPulse</Text>
+          <ActivityIndicator color="#39FF14" style={{ marginTop: 30 }} />
+        </View>
+        <StatusBar style="light" />
+      </LinearGradient>
+    );
+  }
+
+  // 🔐 Pas connecté → écran de login
   if (!user) {
     return (
       <>
@@ -56,6 +103,7 @@ export default function App() {
 
   const displayName = user.name || user.email.split('@')[0];
 
+  // 🎮 Plein écran quand un salon est ouvert
   if (openRoom) {
     return (
       <LinearGradient
@@ -89,6 +137,7 @@ export default function App() {
       colors={['#0a0a0a', '#0f0f0f', '#151515']}
       style={styles.container}
     >
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.logoCircle}>
@@ -104,6 +153,7 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* CONTENU */}
       <View style={{ flex: 1, paddingBottom: 100 }}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
@@ -116,6 +166,7 @@ export default function App() {
         )}
       </View>
 
+      {/* 🎨 BARRE FLOTTANTE */}
       <View style={styles.navBarWrapper}>
         <View style={styles.navBar}>
           {TABS.map((t) => {
@@ -164,6 +215,35 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
 
+  // 🎬 SPLASH SCREEN
+  splashBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  splashLogo: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#111',
+    borderWidth: 2,
+    borderColor: '#39FF14',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: '#39FF14',
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  splashTitle: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+  },
+
+  // HEADER
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -205,7 +285,7 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
 
-  // 🎨 Barre flottante FIXE en bas
+  // 🎨 BARRE FLOTTANTE
   navBarWrapper: {
     position: 'absolute',
     bottom: Platform.OS === 'android' ? 20 : 40,
