@@ -1,5 +1,5 @@
 // ☁️ Service Football-Data.org via Cloudflare Worker (avec cache)
-const PROXY_URL = 'https://goalpulse-proxy.onrender.com';
+const PROXY_URL = 'https://goalpulse-aciq.onrender.com';
 
 // ===========================
 // 📦 TYPES
