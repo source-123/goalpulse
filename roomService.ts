@@ -40,6 +40,28 @@ export interface RoomPrediction {
   };
 }
 
+// ⭐ NOUVEAU : matchs sélectionnés par le créateur
+export interface SelectedMatch {
+  matchId: string;
+  matchInfo: {
+    localteam: string;
+    visitorteam: string;
+    leaguename: string;
+    date: string;
+    time: string;
+    status: string;
+    scoretime: string;
+  };
+  addedBy: string;
+  addedAt: number;
+}
+
+export interface CurrentScore {
+  homeScore: number;
+  awayScore: number;
+  status: string;
+}
+
 // ===========================
 // 🎲 GÉNÉRATION DE CODE
 // ===========================
@@ -213,6 +235,60 @@ export const subscribeRoomMembers = (
 };
 
 // ===========================
+// ⭐ MATCHS SÉLECTIONNÉS DU SALON
+// ===========================
+export const addMatchToRoom = async (
+  code: string,
+  myEmail: string,
+  matchId: string,
+  matchInfo: SelectedMatch['matchInfo']
+): Promise<void> => {
+  const myKey = getUserKey(myEmail);
+  await set(ref(database, `rooms/${code}/selectedMatches/${matchId}`), {
+    matchId,
+    matchInfo,
+    addedBy: myKey,
+    addedAt: Date.now(),
+  });
+  console.log('✅ Match ajouté au salon:', matchId);
+};
+
+export const removeMatchFromRoom = async (
+  code: string,
+  matchId: string
+): Promise<void> => {
+  await remove(ref(database, `rooms/${code}/selectedMatches/${matchId}`));
+  console.log('🗑️ Match retiré du salon:', matchId);
+};
+
+export const subscribeRoomSelectedMatches = (
+  code: string,
+  callback: (matches: SelectedMatch[]) => void
+) => {
+  const ref_ = ref(database, `rooms/${code}/selectedMatches`);
+  return onValue(
+    ref_,
+    (snap) => {
+      const data = snap.val();
+      if (!data) {
+        callback([]);
+        return;
+      }
+      const list: SelectedMatch[] = Object.keys(data).map((key) => ({
+        matchId: key,
+        ...data[key],
+      }));
+      list.sort((a, b) => b.addedAt - a.addedAt);
+      callback(list);
+    },
+    (error) => {
+      console.error('❌ Erreur selectedMatches:', error.message);
+      callback([]);
+    }
+  );
+};
+
+// ===========================
 // 🎯 PRONOSTICS DU SALON
 // ===========================
 export const subscribeRoomPredictions = (
@@ -249,6 +325,17 @@ export const saveRoomPrediction = async (
     status: 'pending',
     matchInfo,
   });
+  console.log('✅ Pari enregistré:', matchId);
+};
+
+export const deleteUserPrediction = async (
+  code: string,
+  myEmail: string,
+  matchId: string
+): Promise<void> => {
+  const myKey = getUserKey(myEmail);
+  await remove(ref(database, `rooms/${code}/predictions/${myKey}/${matchId}`));
+  console.log('🗑️ Pari supprimé:', matchId);
 };
 
 // ===========================
@@ -258,6 +345,7 @@ export const calculatePoints = (
   pred: { homeScore: number; awayScore: number },
   actual: { homeScore: number; awayScore: number }
 ): number => {
+  // Score exact = 5 pts
   if (pred.homeScore === actual.homeScore && pred.awayScore === actual.awayScore) {
     return 5;
   }
@@ -265,7 +353,10 @@ export const calculatePoints = (
   const predDiff = pred.homeScore - pred.awayScore;
   const actualDiff = actual.homeScore - actual.awayScore;
 
+  // Bon écart = 3 pts
   if (predDiff === actualDiff) return 3;
+
+  // Bon vainqueur = 1 pt
   if (Math.sign(predDiff) === Math.sign(actualDiff)) return 1;
 
   return 0;
@@ -300,6 +391,73 @@ export const updateRoomPredictionPoints = async (
 };
 
 // ===========================
+// 🎯 RÉCUPÉRER LES SCORES ACTUELS
+// ===========================
+export const fetchCurrentScores = async (): Promise<
+  Record<string, CurrentScore>
+> => {
+  try {
+    const res = await fetch(
+      'https://goalpulse-aciq.onrender.com/api/check-scores'
+    );
+    const json = await res.json();
+    return json.success ? json.data : {};
+  } catch (err) {
+    console.error('❌ fetchCurrentScores:', err);
+    return {};
+  }
+};
+
+// ===========================
+// 🔄 RECALCULER TOUS LES POINTS D'UN SALON
+// ===========================
+export const recalculateRoomPoints = async (
+  code: string,
+  predictions: Record<string, Record<string, RoomPrediction>>,
+  currentScores: Record<string, CurrentScore>
+): Promise<number> => {
+  let updated = 0;
+
+  for (const userKey of Object.keys(predictions)) {
+    for (const matchId of Object.keys(predictions[userKey])) {
+      const pred = predictions[userKey][matchId];
+      const actual = currentScores[matchId];
+
+      if (
+        actual &&
+        (actual.status === 'FT' || parseInt(actual.status, 10) >= 90)
+      ) {
+        const points = calculatePoints(
+          { homeScore: pred.homeScore, awayScore: pred.awayScore },
+          actual
+        );
+
+        if (points !== pred.points) {
+          try {
+            await update(
+              ref(database, `rooms/${code}/predictions/${userKey}/${matchId}`),
+              {
+                points,
+                status: points > 0 ? 'correct' : 'wrong',
+              }
+            );
+            updated++;
+          } catch (e) {
+            console.error('Erreur update:', e);
+          }
+        }
+      }
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`✅ ${updated} pronostics recalculés`);
+  }
+
+  return updated;
+};
+
+// ===========================
 // 🗑️ QUITTER / SUPPRIMER
 // ===========================
 export const leaveRoom = async (
@@ -309,10 +467,28 @@ export const leaveRoom = async (
   const myKey = getUserKey(myEmail);
   await remove(ref(database, `rooms/${code}/members/${myKey}`));
   await remove(ref(database, `rooms/${code}/predictions/${myKey}`));
+  console.log('🚪 Quitté le salon:', code);
 };
 
 export const deleteRoom = async (code: string): Promise<void> => {
   await remove(ref(database, `rooms/${code}`));
+  console.log('🗑️ Salon supprimé:', code);
+};
+
+// ===========================
+// 👑 EST-CE QUE JE SUIS LE CRÉATEUR ?
+// ===========================
+export const isRoomCreator = async (
+  code: string,
+  myEmail: string
+): Promise<boolean> => {
+  try {
+    const myKey = getUserKey(myEmail);
+    const snap = await get(ref(database, `rooms/${code}/info/createdBy`));
+    return snap.exists() && snap.val() === myKey;
+  } catch (err) {
+    return false;
+  }
 };
 
 // ===========================
@@ -321,12 +497,17 @@ export const deleteRoom = async (code: string): Promise<void> => {
 export const computeRoomLeaderboard = (
   members: RoomMember[],
   predictions: Record<string, Record<string, RoomPrediction>>
-): Array<RoomMember & { points: number; exactCount: number; totalPreds: number }> => {
+): Array<
+  RoomMember & { points: number; exactCount: number; totalPreds: number }
+> => {
   return members
     .map((m) => {
       const userPreds = predictions[m.userKey] || {};
       const predList = Object.values(userPreds);
-      const totalPoints = predList.reduce((sum, p) => sum + (p.points || 0), 0);
+      const totalPoints = predList.reduce(
+        (sum, p) => sum + (p.points || 0),
+        0
+      );
       const exactCount = predList.filter((p) => p.points === 5).length;
       return {
         ...m,

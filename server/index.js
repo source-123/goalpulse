@@ -13,7 +13,7 @@ app.use(cors());
 // 💾 CACHE MÉMOIRE
 // ==================================================
 const cache = new Map();
-const CACHE_TTL = 30 * 1000; // 30 secondes
+const CACHE_TTL = 30 * 1000;
 
 const getCached = (key) => {
   const item = cache.get(key);
@@ -30,7 +30,7 @@ const setCache = (key, data) => {
 };
 
 // ==================================================
-// 🔧 APPEL MCP via SSE (LiveScore)
+// 🔧 APPEL MCP via SSE
 // ==================================================
 const callMCPTool = (toolName, args = {}) => {
   return new Promise((resolve, reject) => {
@@ -90,7 +90,7 @@ const callMCPTool = (toolName, args = {}) => {
 };
 
 // ==================================================
-// 🏥 HEALTH CHECK
+// 🏥 HEALTH
 // ==================================================
 app.get('/health', (req, res) => {
   res.json({
@@ -102,7 +102,7 @@ app.get('/health', (req, res) => {
 });
 
 // ==================================================
-// 🏠 SCORES LIVE (LiveScore MCP + cache 30s)
+// 🏠 SCORES LIVE
 // ==================================================
 app.get('/api/live-scores', async (req, res) => {
   const cached = getCached('live-scores');
@@ -120,7 +120,39 @@ app.get('/api/live-scores', async (req, res) => {
 });
 
 // ==================================================
-// 📅 MATCHS PAR DATE (LiveScore MCP)
+// 🎯 INDEX DES SCORES (pour vérifier paris)
+// ==================================================
+app.get('/api/check-scores', async (req, res) => {
+  const cached = getCached('check-scores');
+  if (cached) return res.json(cached);
+
+  try {
+    const data = await callMCPTool('get_live_scores');
+    const index = {};
+    (data || []).forEach((country) => {
+      (country.leagues || []).forEach((league) => {
+        (league.matches || []).forEach((m) => {
+          const parts = m.scoretime?.split('-').map((s) => s.trim()) || ['-', '-'];
+          index[m.id] = {
+            homeScore: parseInt(parts[0], 10) || 0,
+            awayScore: parseInt(parts[1], 10) || 0,
+            status: m.status,
+          };
+        });
+      });
+    });
+    console.log(`🎯 check-scores: ${Object.keys(index).length} matchs`);
+    const result = { success: true, data: index };
+    setCache('check-scores', result);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ check-scores:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================================================
+// 📅 MATCHS PAR DATE
 // ==================================================
 app.get('/api/matches/:date', async (req, res) => {
   const key = `matches-${req.params.date}`;
@@ -140,7 +172,7 @@ app.get('/api/matches/:date', async (req, res) => {
 });
 
 // ==================================================
-// 📊 DÉTAIL D'UN MATCH (LiveScore MCP)
+// 📊 DÉTAIL D'UN MATCH
 // ==================================================
 app.get('/api/match/:id', async (req, res) => {
   const key = `match-${req.params.id}`;
@@ -158,9 +190,8 @@ app.get('/api/match/:id', async (req, res) => {
 });
 
 // ==================================================
-// 🏆 CLASSEMENT (Football-Data.org — 12 grandes ligues)
+// 🏆 CLASSEMENT (Football-Data.org)
 // ==================================================
-// Codes: PL, PD, SA, BL1, FL1, CL, DED, PPL, BSA, ELC, EC, WC
 app.get('/api/standings/:code', async (req, res) => {
   const key = `standings-${req.params.code}`;
   const cached = getCached(key);

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  TextInput, Alert, ActivityIndicator, Share,
+  TextInput, Alert, ActivityIndicator, Share, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   subscribeRoomMembers, subscribeRoomPredictions,
-  saveRoomPrediction, leaveRoom, RoomMember, RoomPrediction,
+  subscribeRoomSelectedMatches, saveRoomPrediction,
+  addMatchToRoom, removeMatchFromRoom, leaveRoom,
+  deleteUserPrediction,
+  RoomMember, RoomPrediction, SelectedMatch,
   computeRoomLeaderboard,
 } from './roomService';
 import { getUserKey } from './userService';
@@ -15,6 +18,7 @@ import {
   formatTime, isUpcomingStatus,
 } from './liveScoreService';
 import TeamLogo from './TeamLogo';
+import RoomBets from './RoomBets';
 
 interface Props {
   code: string;
@@ -23,29 +27,45 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'predict' | 'leaderboard' | 'mine';
+type Tab = 'matches' | 'bets' | 'leaderboard';
 
 export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
-  const [tab, setTab] = useState<Tab>('predict');
+  const [tab, setTab] = useState<Tab>('matches');
   const [members, setMembers] = useState<RoomMember[]>([]);
+  const [selectedMatches, setSelectedMatches] = useState<SelectedMatch[]>([]);
   const [predictions, setPredictions] = useState<Record<string, Record<string, RoomPrediction>>>({});
-  const [groups, setGroups] = useState<CountryGroup[]>([]);
+  const [allGroups, setAllGroups] = useState<CountryGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedMatch, setSelectedMatch] = useState<RawMatch | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [selectedMatch, setSelectedMatch] = useState<SelectedMatch | null>(null);
   const [homeScore, setHomeScore] = useState('');
   const [awayScore, setAwayScore] = useState('');
 
   const myKey = getUserKey(userEmail);
 
   useEffect(() => {
-    fetchLiveScores().then(setGroups).catch(() => {}).finally(() => setLoading(false));
-    const unsubMembers = subscribeRoomMembers(code, setMembers);
-    const unsubPreds = subscribeRoomPredictions(code, setPredictions);
+    fetchLiveScores().then(setAllGroups).catch(() => {}).finally(() => setLoading(false));
+    const unsubM = subscribeRoomMembers(code, setMembers);
+    const unsubSM = subscribeRoomSelectedMatches(code, setSelectedMatches);
+    const unsubP = subscribeRoomPredictions(code, setPredictions);
     return () => {
-      unsubMembers();
-      unsubPreds();
+      unsubM();
+      unsubSM();
+      unsubP();
     };
   }, [code]);
+
+  // Créateur du salon ?
+  const isCreator = useMemo(() => {
+    if (members.length === 0) return false;
+    // Le premier membre (le créateur) est celui dont le userKey est dans info.createdBy
+    // On le déduit : le créateur est celui qui a le addedAt le plus ancien
+    const sorted = [...members].sort((a, b) => a.joinedAt - b.joinedAt);
+    return sorted[0]?.userKey === myKey;
+  }, [members, myKey]);
+
+  // Mes paris
+  const myPreds = useMemo(() => predictions[myKey] || {}, [predictions, myKey]);
 
   // Classement
   const leaderboard = useMemo(
@@ -53,32 +73,60 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
     [members, predictions]
   );
 
-  // Mes pronostics dans ce salon
-  const myPreds = useMemo(() => predictions[myKey] || {}, [predictions, myKey]);
-
-  // Matchs à venir
+  // Matchs à venir (dans la liste globale) pour le picker
   const upcomingGroups = useMemo(() => {
-    return groups
+    return allGroups
       .map((c) => ({
         ...c,
         leagues: c.leagues
           .map((l) => ({
             ...l,
-            matches: l.matches.filter((m) => isUpcomingStatus(m.status)),
+            matches: l.matches.filter(
+              (m) =>
+                isUpcomingStatus(m.status) &&
+                !selectedMatches.find((sm) => sm.matchId === m.id)
+            ),
           }))
           .filter((l) => l.matches.length > 0),
       }))
       .filter((c) => c.leagues.length > 0);
-  }, [groups]);
+  }, [allGroups, selectedMatches]);
 
-  const totalUpcoming = upcomingGroups.reduce(
-    (s, c) => s + c.leagues.reduce((ss, l) => ss + l.matches.length, 0),
-    0
-  );
+  const handleAddMatch = async (match: RawMatch) => {
+    try {
+      await addMatchToRoom(code, userEmail, match.id, {
+        localteam: match.localteam,
+        visitorteam: match.visitorteam,
+        leaguename: match.leaguename,
+        date: match.date,
+        time: match.time,
+        status: match.status,
+        scoretime: match.scoretime,
+      });
+      Alert.alert('✅ Ajouté', `${match.localteam} vs ${match.visitorteam}`);
+    } catch (e: any) {
+      Alert.alert('Erreur', e.message);
+    }
+  };
 
-  const openPrediction = (match: RawMatch) => {
-    setSelectedMatch(match);
-    const existing = myPreds[match.id];
+  const handleRemoveMatch = (sm: SelectedMatch) => {
+    Alert.alert(
+      'Retirer',
+      `Retirer "${sm.matchInfo.localteam} vs ${sm.matchInfo.visitorteam}" ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Retirer',
+          style: 'destructive',
+          onPress: () => removeMatchFromRoom(code, sm.matchId),
+        },
+      ]
+    );
+  };
+
+  const openBet = (sm: SelectedMatch) => {
+    setSelectedMatch(sm);
+    const existing = myPreds[sm.matchId];
     if (existing) {
       setHomeScore(String(existing.homeScore));
       setAwayScore(String(existing.awayScore));
@@ -88,7 +136,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
     }
   };
 
-  const handleSave = async () => {
+  const handleSaveBet = async () => {
     if (!selectedMatch) return;
     const h = parseInt(homeScore, 10);
     const a = parseInt(awayScore, 10);
@@ -97,46 +145,49 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
       return;
     }
     try {
-      await saveRoomPrediction(code, userEmail, selectedMatch.id, h, a, {
-        localteam: selectedMatch.localteam,
-        visitorteam: selectedMatch.visitorteam,
-        leaguename: selectedMatch.leaguename,
-        date: selectedMatch.date,
-        time: selectedMatch.time,
-        scoretime: selectedMatch.scoretime,
-        status: selectedMatch.status,
-      });
-      Alert.alert('✅ Enregistré', `Ton pronostic : ${h} - ${a}`);
+      await saveRoomPrediction(code, userEmail, selectedMatch.matchId, h, a, selectedMatch.matchInfo);
+      Alert.alert('✅ Pari enregistré', `${h} - ${a}`);
       setSelectedMatch(null);
     } catch (e: any) {
       Alert.alert('Erreur', e.message);
     }
   };
 
+  const handleDeleteBet = () => {
+    if (!selectedMatch) return;
+    Alert.alert('Supprimer', 'Annuler ton pari ?', [
+      { text: 'Non', style: 'cancel' },
+      {
+        text: 'Oui',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteUserPrediction(code, userEmail, selectedMatch.matchId);
+          setSelectedMatch(null);
+        },
+      },
+    ]);
+  };
+
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}\n\nTélécharge l'app et entre ce code pour jouer avec moi.`,
+        message: `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}\n\nTélécharge l'app et entre ce code.`,
       });
-    } catch (e) {}
+    } catch {}
   };
 
   const handleLeave = () => {
-    Alert.alert(
-      'Quitter',
-      `Quitter le salon "${name}" ?`,
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Quitter',
-          style: 'destructive',
-          onPress: async () => {
-            await leaveRoom(code, userEmail);
-            onClose();
-          },
+    Alert.alert('Quitter', `Quitter "${name}" ?`, [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Quitter',
+        style: 'destructive',
+        onPress: async () => {
+          await leaveRoom(code, userEmail);
+          onClose();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (loading) {
@@ -151,24 +202,24 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.backBtn}>
+        <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerTitleBox}>
           <Text style={styles.headerTitle} numberOfLines={1}>{name}</Text>
-          <Text style={styles.headerCode}>{code}</Text>
+          <Text style={styles.headerCode}>{code} • {members.length} joueur{members.length > 1 ? 's' : ''}{isCreator ? ' • 👑 Créateur' : ''}</Text>
         </View>
-        <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
+        <TouchableOpacity onPress={handleShare} style={[styles.iconBtn, { borderColor: '#39FF14' }]}>
           <Ionicons name="share-social" size={20} color="#39FF14" />
         </TouchableOpacity>
       </View>
 
-      {/* Sous-tabs */}
+      {/* Tabs */}
       <View style={styles.tabsRow}>
         {[
-          { key: 'predict', label: '🎯 Pronos' },
+          { key: 'matches', label: '🎯 Matchs' },
+          { key: 'bets', label: '💰 Paris' },
           { key: 'leaderboard', label: '🏆 Classement' },
-          { key: 'mine', label: '📋 Mes paris' },
         ].map((t) => (
           <TouchableOpacity
             key={t.key}
@@ -184,72 +235,103 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
 
       {/* Contenu */}
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-        {tab === 'predict' && (
+        {tab === 'matches' && (
           <>
+            {isCreator && (
+              <TouchableOpacity
+                style={styles.addMatchBtn}
+                onPress={() => setShowPicker(true)}
+              >
+                <Ionicons name="add-circle" size={22} color="#000" />
+                <Text style={styles.addMatchText}>Ajouter des matchs</Text>
+              </TouchableOpacity>
+            )}
+
             <Text style={styles.sectionTitle}>
-              {totalUpcoming} match{totalUpcoming > 1 ? 's' : ''} à pronostiquer
+              ⭐ {selectedMatches.length} match{selectedMatches.length > 1 ? 's' : ''} du salon
             </Text>
-            {upcomingGroups.length === 0 ? (
+
+            {selectedMatches.length === 0 ? (
               <View style={styles.center}>
-                <Ionicons name="football-outline" size={50} color="#333" />
-                <Text style={styles.emptyText}>Aucun match à venir</Text>
+                <Ionicons name="list-outline" size={60} color="#333" />
+                <Text style={styles.emptyText}>
+                  {isCreator ? 'Aucun match ajouté' : 'En attente du créateur'}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {isCreator
+                    ? 'Clique sur "Ajouter des matchs" pour commencer'
+                    : 'Le créateur du salon va bientôt ajouter des matchs'}
+                </Text>
               </View>
             ) : (
-              upcomingGroups.map((c, ci) => (
-                <View key={ci} style={styles.countryBox}>
-                  <Text style={styles.countryTitle}>{c.country}</Text>
-                  {c.leagues.map((l, li) => (
-                    <View key={li} style={styles.leagueBox}>
-                      <Text style={styles.leagueTitle}>{l.league}</Text>
-                      {l.matches.map((m, mi) => {
-                        const hasPred = !!myPreds[m.id];
-                        return (
+              selectedMatches.map((sm) => {
+                const hasBet = !!myPreds[sm.matchId];
+                return (
+                  <View key={sm.matchId} style={styles.matchCard}>
+                    <View style={styles.matchHeader}>
+                      <Text style={styles.leagueName}>{sm.matchInfo.leaguename}</Text>
+                      <View style={styles.matchActions}>
+                        {isCreator && (
                           <TouchableOpacity
-                            key={mi}
-                            style={[styles.matchItem, hasPred && styles.matchItemPredicted]}
-                            onPress={() => openPrediction(m)}
-                            activeOpacity={0.7}
+                            onPress={() => handleRemoveMatch(sm)}
+                            style={styles.actionIconBtn}
                           >
-                            <View style={styles.matchTime}>
-                              <Text style={styles.matchTimeText}>{formatTime(m.time)}</Text>
-                              {hasPred && (
-                                <Ionicons name="checkmark-circle" size={14} color="#39FF14" />
-                              )}
-                            </View>
-                            <View style={styles.matchTeams}>
-                              <View style={styles.matchTeamRow}>
-                                <TeamLogo name={m.localteam} size={20} />
-                                <Text style={styles.matchTeamText} numberOfLines={1}>
-                                  {m.localteam}
-                                </Text>
-                              </View>
-                              <View style={styles.matchTeamRow}>
-                                <TeamLogo name={m.visitorteam} size={20} />
-                                <Text style={styles.matchTeamText} numberOfLines={1}>
-                                  {m.visitorteam}
-                                </Text>
-                              </View>
-                            </View>
-                            <Ionicons
-                              name={hasPred ? 'create' : 'add-circle-outline'}
-                              size={22}
-                              color={hasPred ? '#39FF14' : '#666'}
-                            />
+                            <Ionicons name="trash-outline" size={16} color="#FF3366" />
                           </TouchableOpacity>
-                        );
-                      })}
+                        )}
+                      </View>
                     </View>
-                  ))}
-                </View>
-              ))
+
+                    <View style={styles.matchTeams}>
+                      <View style={styles.matchTeamRow}>
+                        <TeamLogo name={sm.matchInfo.localteam} size={28} />
+                        <Text style={styles.matchTeamName} numberOfLines={1}>
+                          {sm.matchInfo.localteam}
+                        </Text>
+                      </View>
+                      <View style={styles.vsBox}>
+                        <Text style={styles.vsTime}>{formatTime(sm.matchInfo.time)}</Text>
+                        <Text style={styles.vsText}>VS</Text>
+                      </View>
+                      <View style={[styles.matchTeamRow, { justifyContent: 'flex-end' }]}>
+                        <Text style={[styles.matchTeamName, { textAlign: 'right' }]} numberOfLines={1}>
+                          {sm.matchInfo.visitorteam}
+                        </Text>
+                        <TeamLogo name={sm.matchInfo.visitorteam} size={28} />
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.betBtn, hasBet && styles.betBtnDone]}
+                      onPress={() => openBet(sm)}
+                    >
+                      {hasBet ? (
+                        <>
+                          <Ionicons name="checkmark-circle" size={18} color="#39FF14" />
+                          <Text style={[styles.betBtnText, { color: '#39FF14' }]}>
+                            Ton pari : {myPreds[sm.matchId].homeScore} - {myPreds[sm.matchId].awayScore}
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="create-outline" size={18} color="#000" />
+                          <Text style={styles.betBtnText}>Parier</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
             )}
           </>
         )}
 
+        {tab === 'bets' && <RoomBets code={code} userEmail={userEmail} />}
+
         {tab === 'leaderboard' && (
           <>
             <Text style={styles.sectionTitle}>
-              🏆 Classement du salon ({members.length} joueur{members.length > 1 ? 's' : ''})
+              🏆 Classement ({members.length} joueur{members.length > 1 ? 's' : ''})
             </Text>
             {leaderboard.length === 0 ? (
               <View style={styles.center}>
@@ -260,7 +342,12 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                 const isMe = m.userKey === myKey;
                 return (
                   <View key={m.userKey} style={[styles.lbRow, isMe && styles.lbRowMe]}>
-                    <View style={[styles.lbRank, i === 0 && styles.lbRankGold, i === 1 && styles.lbRankSilver, i === 2 && styles.lbRankBronze]}>
+                    <View style={[
+                      styles.lbRank,
+                      i === 0 && { backgroundColor: '#FFD70020', borderColor: '#FFD700' },
+                      i === 1 && { backgroundColor: '#C0C0C020', borderColor: '#C0C0C0' },
+                      i === 2 && { backgroundColor: '#CD7F3220', borderColor: '#CD7F32' },
+                    ]}>
                       <Text style={styles.lbRankText}>
                         {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
                       </Text>
@@ -270,7 +357,7 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                         {m.name}{isMe ? ' (toi)' : ''}
                       </Text>
                       <Text style={styles.lbMeta}>
-                        {m.totalPreds} prono{m.totalPreds > 1 ? 's' : ''} • {m.exactCount} exact
+                        {m.totalPreds} pari{m.totalPreds > 1 ? 's' : ''} • {m.exactCount} exact
                       </Text>
                     </View>
                     <View style={styles.lbPoints}>
@@ -284,50 +371,6 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
           </>
         )}
 
-        {tab === 'mine' && (
-          <>
-            <Text style={styles.sectionTitle}>
-              📋 Mes pronostics ({Object.keys(myPreds).length})
-            </Text>
-            {Object.keys(myPreds).length === 0 ? (
-              <View style={styles.center}>
-                <Ionicons name="clipboard-outline" size={50} color="#333" />
-                <Text style={styles.emptyText}>Aucun pronostic</Text>
-                <Text style={styles.emptySubtext}>
-                  Va dans l'onglet Pronos pour commencer
-                </Text>
-              </View>
-            ) : (
-              Object.values(myPreds).map((p) => (
-                <View key={p.matchId} style={styles.mineCard}>
-                  <View style={styles.mineHeader}>
-                    <Text style={styles.mineLeague}>{p.matchInfo.leaguename}</Text>
-                    <View style={[
-                      styles.minePointsBadge,
-                      p.points >= 5 && { backgroundColor: '#FFD70030' },
-                      p.points >= 1 && p.points < 5 && { backgroundColor: '#39FF1430' },
-                      p.points === 0 && p.status === 'wrong' && { backgroundColor: '#FF336630' },
-                    ]}>
-                      <Text style={styles.minePointsText}>
-                        {p.status === 'pending' ? '⏳ En attente' : `${p.points} pts`}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.mineTeams}>
-                    <Text style={styles.mineTeam} numberOfLines={1}>{p.matchInfo.localteam}</Text>
-                    <View style={styles.mineScoreBox}>
-                      <Text style={styles.mineScore}>{p.homeScore} - {p.awayScore}</Text>
-                    </View>
-                    <Text style={[styles.mineTeam, styles.mineTeamRight]} numberOfLines={1}>
-                      {p.matchInfo.visitorteam}
-                    </Text>
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
-
         <TouchableOpacity style={styles.leaveBtn} onPress={handleLeave}>
           <Ionicons name="exit-outline" size={16} color="#FF3366" />
           <Text style={styles.leaveText}>Quitter le salon</Text>
@@ -336,20 +379,73 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
         <View style={{ height: 60 }} />
       </ScrollView>
 
-      {/* Modal saisie */}
+      {/* Picker : choisir les matchs */}
+      <Modal visible={showPicker} animationType="slide" transparent>
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Choisir un match</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)}>
+                <Ionicons name="close" size={26} color="#888" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ flex: 1 }}>
+              {upcomingGroups.length === 0 ? (
+                <View style={styles.center}>
+                  <Text style={styles.emptyText}>Aucun match disponible</Text>
+                </View>
+              ) : (
+                upcomingGroups.map((c, ci) => (
+                  <View key={ci} style={styles.countryBox}>
+                    <Text style={styles.countryTitle}>{c.country}</Text>
+                    {c.leagues.map((l, li) => (
+                      <View key={li}>
+                        <Text style={styles.leagueTitle}>{l.league}</Text>
+                        {l.matches.map((m, mi) => (
+                          <TouchableOpacity
+                            key={mi}
+                            style={styles.pickMatchRow}
+                            onPress={() => handleAddMatch(m)}
+                          >
+                            <View style={styles.pickTime}>
+                              <Text style={styles.pickTimeText}>{formatTime(m.time)}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.pickTeam} numberOfLines={1}>
+                                {m.localteam}
+                              </Text>
+                              <Text style={styles.pickTeam} numberOfLines={1}>
+                                {m.visitorteam}
+                              </Text>
+                            </View>
+                            <Ionicons name="add-circle" size={26} color="#39FF14" />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ))}
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal pari */}
       {selectedMatch && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Ton pronostic</Text>
-            <Text style={styles.modalLeague}>{selectedMatch.leaguename}</Text>
-            <View style={styles.modalTeams}>
-              <View style={styles.modalTeamCol}>
-                <TeamLogo name={selectedMatch.localteam} size={40} />
-                <Text style={styles.modalTeamName} numberOfLines={2}>
-                  {selectedMatch.localteam}
+        <View style={styles.betOverlay}>
+          <View style={styles.betSheet}>
+            <Text style={styles.betTitle}>Ton pari</Text>
+            <Text style={styles.betLeague}>{selectedMatch.matchInfo.leaguename}</Text>
+
+            <View style={styles.betTeamsRow}>
+              <View style={styles.betTeamCol}>
+                <TeamLogo name={selectedMatch.matchInfo.localteam} size={44} />
+                <Text style={styles.betTeamName} numberOfLines={2}>
+                  {selectedMatch.matchInfo.localteam}
                 </Text>
               </View>
-              <View style={styles.modalScoreCol}>
+              <View style={styles.betScoreCol}>
                 <View style={styles.scoreInputRow}>
                   <TextInput
                     style={styles.scoreInput}
@@ -372,26 +468,41 @@ export default function RoomDetail({ code, name, userEmail, onClose }: Props) {
                   />
                 </View>
               </View>
-              <View style={styles.modalTeamCol}>
-                <TeamLogo name={selectedMatch.visitorteam} size={40} />
-                <Text style={styles.modalTeamName} numberOfLines={2}>
-                  {selectedMatch.visitorteam}
+              <View style={styles.betTeamCol}>
+                <TeamLogo name={selectedMatch.matchInfo.visitorteam} size={44} />
+                <Text style={styles.betTeamName} numberOfLines={2}>
+                  {selectedMatch.matchInfo.visitorteam}
                 </Text>
               </View>
             </View>
-            <View style={styles.modalActions}>
+
+            <Text style={styles.pointsInfo}>
+              🎯 Score exact : <Text style={styles.pointsHi}>5 pts</Text>
+              {'\n'}✌️ Bon écart : <Text style={styles.pointsHi}>3 pts</Text>
+              {'\n'}✅ Bon vainqueur : <Text style={styles.pointsHi}>1 pt</Text>
+            </Text>
+
+            <View style={styles.betActions}>
+              {myPreds[selectedMatch.matchId] && (
+                <TouchableOpacity
+                  style={[styles.betBtn2, { backgroundColor: '#FF336620', borderWidth: 1, borderColor: '#FF3366' }]}
+                  onPress={handleDeleteBet}
+                >
+                  <Ionicons name="trash" size={18} color="#FF3366" />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancel]}
+                style={[styles.betBtn2, { backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333' }]}
                 onPress={() => setSelectedMatch(null)}
               >
-                <Text style={styles.modalBtnCancelText}>Annuler</Text>
+                <Text style={{ color: '#888', fontWeight: '600' }}>Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSave]}
-                onPress={handleSave}
+                style={[styles.betBtn2, { backgroundColor: '#39FF14', flex: 2 }]}
+                onPress={handleSaveBet}
               >
                 <Ionicons name="checkmark" size={20} color="#000" />
-                <Text style={styles.modalBtnSaveText}>Valider</Text>
+                <Text style={{ color: '#000', fontWeight: 'bold' }}>Valider</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -406,13 +517,13 @@ const styles = StyleSheet.create({
   fullCenter: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   center: { alignItems: 'center', paddingVertical: 40 },
   emptyText: { color: '#666', fontSize: 16, marginTop: 12, fontWeight: '600' },
-  emptySubtext: { color: '#444', fontSize: 12, marginTop: 4, textAlign: 'center' },
+  emptySubtext: { color: '#444', fontSize: 12, marginTop: 5, textAlign: 'center', paddingHorizontal: 30 },
 
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 15, marginBottom: 15,
+    paddingHorizontal: 15, marginBottom: 12,
   },
-  backBtn: {
+  iconBtn: {
     width: 40, height: 40, borderRadius: 12,
     backgroundColor: '#1c1c1c',
     justifyContent: 'center', alignItems: 'center',
@@ -420,17 +531,9 @@ const styles = StyleSheet.create({
   },
   headerTitleBox: { flex: 1 },
   headerTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  headerCode: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 },
-  shareBtn: {
-    width: 40, height: 40, borderRadius: 12,
-    backgroundColor: '#1c1c1c',
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: '#39FF14',
-  },
+  headerCode: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5, marginTop: 2 },
 
-  tabsRow: {
-    flexDirection: 'row', gap: 6, marginBottom: 15, paddingHorizontal: 15,
-  },
+  tabsRow: { flexDirection: 'row', gap: 6, marginBottom: 12, paddingHorizontal: 15 },
   tabBtn: {
     flex: 1, paddingVertical: 10, borderRadius: 10,
     backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333',
@@ -440,30 +543,48 @@ const styles = StyleSheet.create({
   tabText: { color: '#888', fontSize: 11, fontWeight: '600' },
   tabTextActive: { color: '#000' },
 
+  addMatchBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#39FF14', paddingVertical: 14, borderRadius: 12,
+    marginHorizontal: 15, marginBottom: 15,
+  },
+  addMatchText: { color: '#000', fontWeight: 'bold', fontSize: 14 },
+
   sectionTitle: {
     color: '#39FF14', fontSize: 13, fontWeight: 'bold',
     marginBottom: 10, paddingHorizontal: 15, letterSpacing: 0.5,
   },
 
-  countryBox: { marginBottom: 15, paddingHorizontal: 15 },
-  countryTitle: {
-    color: '#aaa', fontSize: 11, fontWeight: 'bold',
-    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6,
+  matchCard: {
+    backgroundColor: '#171717', borderRadius: 12, padding: 12,
+    marginBottom: 10, marginHorizontal: 15,
+    borderWidth: 1, borderColor: '#262626',
   },
-  leagueBox: { marginBottom: 10 },
-  leagueTitle: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', marginBottom: 6 },
+  matchHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 10,
+  },
+  leagueName: { color: '#666', fontSize: 11, flex: 1 },
+  matchActions: { flexDirection: 'row', gap: 6 },
+  actionIconBtn: {
+    width: 30, height: 30, borderRadius: 8,
+    backgroundColor: '#FF336615',
+    justifyContent: 'center', alignItems: 'center',
+  },
 
-  matchItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#171717', padding: 10, borderRadius: 10,
-    marginBottom: 6, borderWidth: 1, borderColor: '#262626',
+  matchTeams: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  matchTeamRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  matchTeamName: { flex: 1, color: '#fff', fontSize: 12, fontWeight: '500' },
+  vsBox: { alignItems: 'center', paddingHorizontal: 6 },
+  vsTime: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
+  vsText: { color: '#555', fontSize: 9, marginTop: 1 },
+
+  betBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#39FF14', paddingVertical: 10, borderRadius: 10,
   },
-  matchItemPredicted: { borderColor: '#39FF1444' },
-  matchTime: { alignItems: 'center', width: 45, gap: 2 },
-  matchTimeText: { color: '#666', fontSize: 11, fontWeight: '600' },
-  matchTeams: { flex: 1, gap: 4 },
-  matchTeamRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  matchTeamText: { color: '#fff', fontSize: 12, flex: 1 },
+  betBtnDone: { backgroundColor: '#39FF1415', borderWidth: 1, borderColor: '#39FF14' },
+  betBtnText: { color: '#000', fontWeight: 'bold', fontSize: 13 },
 
   lbRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -477,9 +598,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#333',
   },
-  lbRankGold: { backgroundColor: '#FFD70020', borderColor: '#FFD700' },
-  lbRankSilver: { backgroundColor: '#C0C0C020', borderColor: '#C0C0C0' },
-  lbRankBronze: { backgroundColor: '#CD7F3220', borderColor: '#CD7F32' },
   lbRankText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   lbInfo: { flex: 1 },
   lbName: { color: '#fff', fontSize: 14, fontWeight: '600' },
@@ -487,29 +605,6 @@ const styles = StyleSheet.create({
   lbPoints: { alignItems: 'flex-end' },
   lbPointsText: { color: '#39FF14', fontSize: 20, fontWeight: 'bold' },
   lbPointsLabel: { color: '#666', fontSize: 9, fontWeight: '600' },
-
-  mineCard: {
-    backgroundColor: '#171717', padding: 12, borderRadius: 10,
-    marginBottom: 8, marginHorizontal: 15, borderWidth: 1, borderColor: '#262626',
-  },
-  mineHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 8,
-  },
-  mineLeague: { color: '#666', fontSize: 11 },
-  minePointsBadge: {
-    backgroundColor: '#333', paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 6,
-  },
-  minePointsText: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  mineTeams: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  mineTeam: { flex: 1, color: '#fff', fontSize: 13 },
-  mineTeamRight: { textAlign: 'right' },
-  mineScoreBox: {
-    backgroundColor: '#0a0a0a', paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 8, borderWidth: 1, borderColor: '#39FF1444',
-  },
-  mineScore: { color: '#39FF14', fontSize: 15, fontWeight: 'bold' },
 
   leaveBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -520,21 +615,52 @@ const styles = StyleSheet.create({
   },
   leaveText: { color: '#FF3366', fontSize: 13, fontWeight: '600' },
 
-  modalOverlay: {
+  pickerOverlay: {
+    flex: 1, backgroundColor: '#000000CC',
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: '#111', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, height: '85%',
+    borderTopWidth: 1, borderColor: '#333',
+  },
+  pickerHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 15,
+  },
+  pickerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+
+  countryBox: { marginBottom: 15 },
+  countryTitle: {
+    color: '#aaa', fontSize: 11, fontWeight: 'bold',
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6,
+  },
+  leagueTitle: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', marginBottom: 6 },
+
+  pickMatchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#1a1a1a', padding: 10, borderRadius: 10,
+    marginBottom: 6, borderWidth: 1, borderColor: '#262626',
+  },
+  pickTime: { width: 40 },
+  pickTimeText: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
+  pickTeam: { color: '#fff', fontSize: 12 },
+
+  betOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: '#000000CC', justifyContent: 'center',
     alignItems: 'center', padding: 20,
   },
-  modalSheet: {
+  betSheet: {
     backgroundColor: '#111', borderRadius: 20, padding: 20,
     width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#333',
   },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', textAlign: 'center' },
-  modalLeague: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 20 },
-  modalTeams: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },
-  modalTeamCol: { flex: 1, alignItems: 'center', gap: 6 },
-  modalTeamName: { color: '#fff', fontSize: 12, textAlign: 'center' },
-  modalScoreCol: { alignItems: 'center' },
+  betTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', textAlign: 'center' },
+  betLeague: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 20 },
+  betTeamsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },
+  betTeamCol: { flex: 1, alignItems: 'center', gap: 6 },
+  betTeamName: { color: '#fff', fontSize: 12, textAlign: 'center' },
+  betScoreCol: { alignItems: 'center' },
   scoreInputRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   scoreInput: {
     width: 50, height: 60, backgroundColor: '#0a0a0a',
@@ -543,14 +669,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   scoreDash: { color: '#555', fontSize: 22, fontWeight: 'bold' },
-  modalActions: { flexDirection: 'row', gap: 10 },
-  modalBtn: {
+  pointsInfo: {
+    color: '#666', fontSize: 11, textAlign: 'center',
+    lineHeight: 18, marginBottom: 15,
+  },
+  pointsHi: { color: '#39FF14', fontWeight: 'bold' },
+  betActions: { flexDirection: 'row', gap: 10 },
+  betBtn2: {
     flex: 1, paddingVertical: 12, borderRadius: 10,
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: 6,
   },
-  modalBtnCancel: { backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#333' },
-  modalBtnSave: { backgroundColor: '#39FF14' },
-  modalBtnCancelText: { color: '#888', fontSize: 14, fontWeight: '600' },
-  modalBtnSaveText: { color: '#000', fontSize: 14, fontWeight: 'bold' },
 });
