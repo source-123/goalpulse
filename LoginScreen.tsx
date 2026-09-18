@@ -326,11 +326,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
-    shadowColor: '#39FF14',
-    shadowOpacity: 0.9,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 15,
+    boxShadow: "0px 0px 20px rgba(57, 255, 20, 0.5)",
+    
+    
+    
+  
   },
   logo: {
     width: 92,
@@ -364,11 +364,11 @@ const styles = StyleSheet.create({
     padding: 22,
     borderWidth: 1,
     borderColor: '#1a1a1a',
-    shadowColor: '#000',
-    shadowOpacity: 0.8,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
+    boxShadow: "0px 0px 20px rgba(57, 255, 20, 0.5)",
+    
+    
+    
+  
   },
   cardHeader: {
     marginBottom: 22,
@@ -411,11 +411,11 @@ const styles = StyleSheet.create({
   fieldFocused: {
     borderColor: '#39FF14',
     backgroundColor: '#0f120f',
-    shadowColor: '#39FF14',
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 4,
+    boxShadow: "0px 0px 20px rgba(57, 255, 20, 0.5)",
+    
+    
+    
+  
   },
   fieldInput: {
     flex: 1,
@@ -441,11 +441,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     marginTop: 4,
-    shadowColor: '#39FF14',
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    boxShadow: "0px 0px 20px rgba(57, 255, 20, 0.5)",
+    
+    
+    
+  
   },
   primaryGradient: {
     flexDirection: 'row',
