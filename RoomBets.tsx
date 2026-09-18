@@ -12,6 +12,7 @@ import {
 } from './roomService';
 import { getUserKey } from './userService';
 import TeamLogo from './TeamLogo';
+import { formatBetLabel, getBetType } from './betTypes';
 
 interface Props {
   code: string;
@@ -50,16 +51,12 @@ export default function RoomBets({ code, userEmail }: Props) {
     setRefreshing(false);
   };
 
-  // Pour chaque match sélectionné, lister les paris
   const matchBets = useMemo(() => {
     return selectedMatches.map((sm) => {
       const bets: Array<{
         userKey: string;
         userName: string;
-        homeScore: number;
-        awayScore: number;
-        points: number;
-        status: string;
+        pred: RoomPrediction;
         isMe: boolean;
       }> = [];
 
@@ -70,16 +67,13 @@ export default function RoomBets({ code, userEmail }: Props) {
           bets.push({
             userKey,
             userName: member?.name || 'Joueur',
-            homeScore: pred.homeScore,
-            awayScore: pred.awayScore,
-            points: pred.points || 0,
-            status: pred.status || 'pending',
+            pred,
             isMe: userKey === myKey,
           });
         }
       });
 
-      bets.sort((a, b) => b.points - a.points || Number(b.isMe) - Number(a.isMe));
+      bets.sort((a, b) => (b.pred.points || 0) - (a.pred.points || 0) || Number(b.isMe) - Number(a.isMe));
 
       return { selectedMatch: sm, bets };
     });
@@ -145,7 +139,7 @@ export default function RoomBets({ code, userEmail }: Props) {
               )}
             </View>
 
-            {/* Équipes + score actuel */}
+            {/* Équipes + score */}
             <View style={styles.teamsRow}>
               <View style={styles.teamBox}>
                 <TeamLogo name={sm.matchInfo.localteam} size={28} />
@@ -175,43 +169,53 @@ export default function RoomBets({ code, userEmail }: Props) {
               {bets.length === 0 ? (
                 <Text style={styles.noBets}>Aucun pari pour ce match</Text>
               ) : (
-                bets.map((b, i) => (
-                  <View
-                    key={i}
-                    style={[styles.betRow, b.isMe && styles.betRowMe]}
-                  >
-                    <View style={styles.betAvatar}>
-                      <Text style={styles.betAvatarText}>
-                        {b.userName.slice(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.betName} numberOfLines={1}>
-                      {b.userName}{b.isMe ? ' (toi)' : ''}
-                    </Text>
-                    <View style={styles.betScoreBox}>
-                      <Text style={styles.betScore}>
-                        {b.homeScore} - {b.awayScore}
-                      </Text>
-                    </View>
-                    {isFinished && (
-                      <View style={[
-                        styles.betPointsBadge,
-                        b.points >= 5 && { backgroundColor: '#FFD70030', borderColor: '#FFD700' },
-                        b.points >= 1 && b.points < 5 && { backgroundColor: '#39FF1430', borderColor: '#39FF14' },
-                        b.points === 0 && { backgroundColor: '#FF336620', borderColor: '#FF3366' },
-                      ]}>
-                        <Text style={[
-                          styles.betPointsText,
-                          b.points >= 5 && { color: '#FFD700' },
-                          b.points >= 1 && b.points < 5 && { color: '#39FF14' },
-                          b.points === 0 && { color: '#FF3366' },
-                        ]}>
-                          {b.points} pts
+                bets.map((b, i) => {
+                  const bt = getBetType(b.pred.betType || 'exact_score');
+                  const label = formatBetLabel({
+                    type: b.pred.betType || 'exact_score',
+                    value: b.pred.betValue,
+                    homeScore: b.pred.homeScore,
+                    awayScore: b.pred.awayScore,
+                  });
+
+                  return (
+                    <View
+                      key={i}
+                      style={[styles.betRow, b.isMe && styles.betRowMe]}
+                    >
+                      <View style={styles.betAvatar}>
+                        <Text style={styles.betAvatarText}>
+                          {b.userName.slice(0, 2).toUpperCase()}
                         </Text>
                       </View>
-                    )}
-                  </View>
-                ))
+                      <Text style={styles.betName} numberOfLines={1}>
+                        {b.userName}{b.isMe ? ' (toi)' : ''}
+                      </Text>
+                      <View style={styles.betScoreBox}>
+                        <Text style={styles.betScore} numberOfLines={1}>
+                          {bt?.icon} {label}
+                        </Text>
+                      </View>
+                      {isFinished && (
+                        <View style={[
+                          styles.betPointsBadge,
+                          b.pred.points >= 5 && { backgroundColor: '#FFD70030', borderColor: '#FFD700' },
+                          b.pred.points >= 1 && b.pred.points < 5 && { backgroundColor: '#39FF1430', borderColor: '#39FF14' },
+                          b.pred.points === 0 && { backgroundColor: '#FF336620', borderColor: '#FF3366' },
+                        ]}>
+                          <Text style={[
+                            styles.betPointsText,
+                            b.pred.points >= 5 && { color: '#FFD700' },
+                            b.pred.points >= 1 && b.pred.points < 5 && { color: '#39FF14' },
+                            b.pred.points === 0 && { color: '#FF3366' },
+                          ]}>
+                            {b.pred.points} pts
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
               )}
             </View>
           </View>
@@ -274,12 +278,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   betAvatarText: { color: '#39FF14', fontSize: 10, fontWeight: 'bold' },
-  betName: { flex: 1, color: '#ccc', fontSize: 12 },
+  betName: { color: '#ccc', fontSize: 11, flex: 1, maxWidth: 80 },
   betScoreBox: {
-    backgroundColor: '#1c1c1c', paddingHorizontal: 8, paddingVertical: 3,
+    flex: 1,
+    backgroundColor: '#1c1c1c',
+    paddingHorizontal: 8, paddingVertical: 4,
     borderRadius: 6,
+    alignItems: 'flex-end',
   },
-  betScore: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  betScore: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
   betPointsBadge: {
     paddingHorizontal: 6, paddingVertical: 3,
     borderRadius: 6, borderWidth: 1, borderColor: '#444',

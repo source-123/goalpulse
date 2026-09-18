@@ -6,13 +6,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import {
   subscribeRoomMembers, subscribeRoomPredictions,
-  subscribeRoomSelectedMatches, saveRoomPrediction,
+  subscribeRoomSelectedMatches, saveAdvancedPrediction,
   addMatchToRoom, removeMatchFromRoom, leaveRoom,
   deleteUserPrediction,
   RoomMember, RoomPrediction, SelectedMatch,
   computeRoomLeaderboard,
 } from './roomService';
 import { getUserKey } from './userService';
+import { BET_TYPES, BetType, getBetType } from './betTypes';
 import {
   fetchLiveScores, CountryGroup, RawMatch, formatTime,
 } from './liveScoreService';
@@ -54,6 +55,8 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('live');
   const [selectedMatch, setSelectedMatch] = useState<SelectedMatch | null>(null);
+  const [selectedBetType, setSelectedBetType] = useState<BetType>('exact_score');
+  const [selectedBetValue, setSelectedBetValue] = useState<string>('');
   const [homeScore, setHomeScore] = useState('');
   const [awayScore, setAwayScore] = useState('');
 
@@ -165,9 +168,13 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
     setSelectedMatch(sm);
     const existing = myPreds[sm.matchId];
     if (existing) {
-      setHomeScore(String(existing.homeScore));
-      setAwayScore(String(existing.awayScore));
+      setSelectedBetType((existing.betType as BetType) || 'exact_score');
+      setSelectedBetValue(existing.betValue || '');
+      setHomeScore(existing.homeScore !== undefined && existing.homeScore !== null ? String(existing.homeScore) : '');
+      setAwayScore(existing.awayScore !== undefined && existing.awayScore !== null ? String(existing.awayScore) : '');
     } else {
+      setSelectedBetType('exact_score');
+      setSelectedBetValue('');
       setHomeScore('');
       setAwayScore('');
     }
@@ -175,16 +182,36 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
 
   const handleSaveBet = async () => {
     if (!selectedMatch) return;
-    const h = parseInt(homeScore, 10);
-    const a = parseInt(awayScore, 10);
-    if (isNaN(h) || isNaN(a) || h < 0 || a < 0) {
-      Alert.alert('Erreur', 'Score invalide');
-      return;
-    }
-    try {
-      await saveRoomPrediction(code, userEmail, selectedMatch.matchId, h, a, selectedMatch.matchInfo);
 
-      // 🔔 Notifier les AUTRES membres du salon
+    let h: number | undefined;
+    let a: number | undefined;
+    let value: string | undefined;
+
+    if (selectedBetType === 'exact_score') {
+      const hh = parseInt(homeScore, 10);
+      const aa = parseInt(awayScore, 10);
+      if (isNaN(hh) || isNaN(aa) || hh < 0 || aa < 0) {
+        Alert.alert('Erreur', 'Score invalide');
+        return;
+      }
+      h = hh;
+      a = aa;
+    } else {
+      if (!selectedBetValue) {
+        Alert.alert('Erreur', 'Choisis une option');
+        return;
+      }
+      value = selectedBetValue;
+    }
+
+    try {
+      await saveAdvancedPrediction(
+        code, userEmail, selectedMatch.matchId,
+        selectedBetType, value, h, a,
+        selectedMatch.matchInfo
+      );
+
+      // 🔔 Notifier les autres membres
       try {
         const otherMemberKeys = members
           .filter((m) => m.userKey !== myKey)
@@ -194,15 +221,13 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
           sendPushNotification(
             otherMemberKeys,
             '🎯 Nouveau pari !',
-            `${userName} a parié ${h}-${a} sur ${selectedMatch.matchInfo.localteam} vs ${selectedMatch.matchInfo.visitorteam}`,
+            `${userName} a parié sur ${selectedMatch.matchInfo.localteam} vs ${selectedMatch.matchInfo.visitorteam}`,
             { roomCode: code, matchId: selectedMatch.matchId }
           );
         }
-      } catch (e) {
-        console.error('Erreur notif:', e);
-      }
+      } catch (e) {}
 
-      Alert.alert('✅ Pari enregistré', `${h} - ${a}`);
+      Alert.alert('✅ Pari enregistré');
       setSelectedMatch(null);
     } catch (e: any) {
       Alert.alert('Erreur', e.message);
@@ -225,27 +250,24 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
   };
 
   const handleShare = async () => {
-    const message = `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}\n\nTélécharge l'app GoalPulse et entre ce code pour jouer avec moi.`;
+    const message = `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}\n\nTélécharge l'app GoalPulse et entre ce code.`;
 
-    // 🌐 WEB : copier dans le presse-papiers + alerte
     if (Platform.OS === 'web') {
       try {
         await navigator.clipboard.writeText(message);
-        Alert.alert('✅ Copié !', 'Le message est dans ton presse-papiers');
+        Alert.alert('✅ Copié !');
       } catch (e) {
         Alert.alert('Code du salon', message);
       }
       return;
     }
-
-    // 📱 MOBILE : partage natif
     try {
       await Share.share({ message });
     } catch {}
   };
 
   const handleShareWhatsApp = async () => {
-    const text = `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}\n\nEntre ce code dans l'app pour jouer avec moi ⚽`;
+    const text = `🎮 Rejoins mon salon GoalPulse "${name}" !\n\nCode : ${code}`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
 
     if (Platform.OS === 'web') {
@@ -256,7 +278,6 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
       }
       return;
     }
-
     try {
       await Share.share({ message: text });
     } catch {}
@@ -283,6 +304,8 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
       </View>
     );
   }
+
+  const betType = getBetType(selectedBetType);
 
   return (
     <View style={styles.container}>
@@ -355,15 +378,11 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
                   <Text style={styles.emptyText}>
                     {isCreator ? 'Aucun match ajouté' : 'En attente du créateur'}
                   </Text>
-                  <Text style={styles.emptySubtext}>
-                    {isCreator
-                      ? 'Clique sur "Ajouter des matchs"'
-                      : 'Le créateur va ajouter des matchs'}
-                  </Text>
                 </View>
               ) : (
                 selectedMatches.map((sm) => {
                   const hasBet = !!myPreds[sm.matchId];
+                  const pred = myPreds[sm.matchId];
                   const type = getMatchType(sm.matchInfo.status);
                   return (
                     <View key={sm.matchId} style={styles.matchCard}>
@@ -412,8 +431,9 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
                         {hasBet ? (
                           <>
                             <Ionicons name="checkmark-circle" size={18} color="#39FF14" />
-                            <Text style={[styles.betBtnText, { color: '#39FF14' }]}>
-                              Ton pari : {myPreds[sm.matchId].homeScore} - {myPreds[sm.matchId].awayScore}
+                            <Text style={[styles.betBtnText, { color: '#39FF14' }]} numberOfLines={1}>
+                              {getBetType(pred.betType || 'exact_score')?.icon}{' '}
+                              {pred.betType === 'exact_score' ? `${pred.homeScore} - ${pred.awayScore}` : getBetType(pred.betType || 'exact_score')?.name}
                             </Text>
                           </>
                         ) : (
@@ -600,6 +620,54 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
             <Text style={styles.betTitle}>Ton pari</Text>
             <Text style={styles.betLeague}>{selectedMatch.matchInfo.leaguename}</Text>
 
+            {/* TYPES DE PARIS */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ maxHeight: 75, marginBottom: 15 }}
+              contentContainerStyle={{ gap: 6 }}
+            >
+              {BET_TYPES.map((bt) => {
+                const isActive = selectedBetType === bt.id;
+                return (
+                  <TouchableOpacity
+                    key={bt.id}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      borderRadius: 10,
+                      backgroundColor: isActive ? bt.color : '#1c1c1c',
+                      borderWidth: 1,
+                      borderColor: isActive ? bt.color : '#333',
+                      alignItems: 'center',
+                      minWidth: 85,
+                    }}
+                    onPress={() => {
+                      setSelectedBetType(bt.id);
+                      setSelectedBetValue('');
+                      setHomeScore('');
+                      setAwayScore('');
+                    }}
+                  >
+                    <Text style={{ fontSize: 18 }}>{bt.icon}</Text>
+                    <Text
+                      style={{
+                        color: isActive ? '#000' : '#888',
+                        fontSize: 9,
+                        fontWeight: 'bold',
+                        marginTop: 2,
+                        textAlign: 'center',
+                      }}
+                      numberOfLines={1}
+                    >
+                      {bt.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* ÉQUIPES */}
             <View style={styles.betTeamsRow}>
               <View style={styles.betTeamCol}>
                 <TeamLogo name={selectedMatch.matchInfo.localteam} size={44} />
@@ -607,29 +675,37 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
                   {selectedMatch.matchInfo.localteam}
                 </Text>
               </View>
+
               <View style={styles.betScoreCol}>
-                <View style={styles.scoreInputRow}>
-                  <TextInput
-                    style={styles.scoreInput}
-                    value={homeScore}
-                    onChangeText={(t) => setHomeScore(t.replace(/[^0-9]/g, ''))}
-                    keyboardType="numeric"
-                    maxLength={2}
-                    placeholder="0"
-                    placeholderTextColor="#444"
-                  />
-                  <Text style={styles.scoreDash}>-</Text>
-                  <TextInput
-                    style={styles.scoreInput}
-                    value={awayScore}
-                    onChangeText={(t) => setAwayScore(t.replace(/[^0-9]/g, ''))}
-                    keyboardType="numeric"
-                    maxLength={2}
-                    placeholder="0"
-                    placeholderTextColor="#444"
-                  />
-                </View>
+                {selectedBetType === 'exact_score' ? (
+                  <View style={styles.scoreInputRow}>
+                    <TextInput
+                      style={styles.scoreInput}
+                      value={homeScore}
+                      onChangeText={(t) => setHomeScore(t.replace(/[^0-9]/g, ''))}
+                      keyboardType="numeric"
+                      maxLength={2}
+                      placeholder="0"
+                      placeholderTextColor="#444"
+                    />
+                    <Text style={styles.scoreDash}>-</Text>
+                    <TextInput
+                      style={styles.scoreInput}
+                      value={awayScore}
+                      onChangeText={(t) => setAwayScore(t.replace(/[^0-9]/g, ''))}
+                      keyboardType="numeric"
+                      maxLength={2}
+                      placeholder="0"
+                      placeholderTextColor="#444"
+                    />
+                  </View>
+                ) : (
+                  <Text style={{ color: '#666', fontSize: 11, textAlign: 'center' }}>
+                    Choisis{'\n'}↓
+                  </Text>
+                )}
               </View>
+
               <View style={styles.betTeamCol}>
                 <TeamLogo name={selectedMatch.matchInfo.visitorteam} size={44} />
                 <Text style={styles.betTeamName} numberOfLines={2}>
@@ -638,10 +714,43 @@ export default function RoomDetail({ code, name, userEmail, userName, onClose }:
               </View>
             </View>
 
+            {/* OPTIONS */}
+            {selectedBetType !== 'exact_score' && betType?.options && (
+              <View style={{ gap: 8, marginBottom: 15 }}>
+                {betType.options.map((opt) => {
+                  const isActive = selectedBetValue === opt.value;
+                  return (
+                    <TouchableOpacity
+                      key={opt.value}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 15,
+                        borderRadius: 10,
+                        backgroundColor: isActive ? betType.color : '#1c1c1c',
+                        borderWidth: 1,
+                        borderColor: isActive ? betType.color : '#333',
+                      }}
+                      onPress={() => setSelectedBetValue(opt.value)}
+                    >
+                      <Text
+                        style={{
+                          color: isActive ? '#000' : '#aaa',
+                          fontWeight: '600',
+                          fontSize: 14,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
             <Text style={styles.pointsInfo}>
-              🎯 Score exact : <Text style={styles.pointsHi}>5 pts</Text>
-              {'\n'}✌️ Bon écart : <Text style={styles.pointsHi}>3 pts</Text>
-              {'\n'}✅ Bon vainqueur : <Text style={styles.pointsHi}>1 pt</Text>
+              {betType?.icon} {betType?.name} : <Text style={styles.pointsHi}>{betType?.points} pts</Text>
+              {'\n'}{betType?.description}
             </Text>
 
             <View style={styles.betActions}>
@@ -679,7 +788,6 @@ const styles = StyleSheet.create({
   fullCenter: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   center: { alignItems: 'center', paddingVertical: 40 },
   emptyText: { color: '#666', fontSize: 16, marginTop: 12, fontWeight: '600' },
-  emptySubtext: { color: '#444', fontSize: 12, marginTop: 5, textAlign: 'center', paddingHorizontal: 30 },
 
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -748,9 +856,10 @@ const styles = StyleSheet.create({
   betBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     backgroundColor: '#39FF14', paddingVertical: 10, borderRadius: 10,
+    paddingHorizontal: 8,
   },
   betBtnDone: { backgroundColor: '#39FF1415', borderWidth: 1, borderColor: '#39FF14' },
-  betBtnText: { color: '#000', fontWeight: 'bold', fontSize: 13 },
+  betBtnText: { color: '#000', fontWeight: 'bold', fontSize: 12, flexShrink: 1 },
 
   lbRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -837,11 +946,12 @@ const styles = StyleSheet.create({
   },
   betSheet: {
     backgroundColor: '#111', borderRadius: 20, padding: 20,
-    width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#333',
+    width: '100%', maxWidth: 450, borderWidth: 1, borderColor: '#333',
+    maxHeight: '90%',
   },
   betTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', textAlign: 'center' },
-  betLeague: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 20 },
-  betTeamsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 20 },
+  betLeague: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 15 },
+  betTeamsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 15 },
   betTeamCol: { flex: 1, alignItems: 'center', gap: 6 },
   betTeamName: { color: '#fff', fontSize: 12, textAlign: 'center' },
   betScoreCol: { alignItems: 'center' },
