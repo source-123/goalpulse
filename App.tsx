@@ -28,6 +28,8 @@ interface User {
 
 type Tab = 'matches' | 'standings' | 'rooms' | 'profile';
 
+const MIN_SPLASH_TIME = 3500; // ⏱️ 3.5 secondes minimum
+
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
@@ -37,6 +39,8 @@ function AppContent() {
   const { t, isRTL } = useLanguage();
 
   useEffect(() => {
+    const startTime = Date.now();
+
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
@@ -48,8 +52,16 @@ function AppContent() {
       } else {
         setUser(null);
       }
-      setRestoring(false);
+
+      // ⏱️ Attendre minimum 3.5s avant de cacher le splash
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, MIN_SPLASH_TIME - elapsed);
+
+      setTimeout(() => {
+        setRestoring(false);
+      }, remaining);
     });
+
     return () => unsub();
   }, []);
 
@@ -61,7 +73,7 @@ function AppContent() {
   }, [user]);
 
   const handleLogout = () => {
-    Alert.alert(t.signIn, 'Vous déconnecter ?', [
+    Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
       { text: t.cancel, style: 'cancel' },
       {
         text: t.signIn,
@@ -74,17 +86,21 @@ function AppContent() {
     ]);
   };
 
+  // 🎬 SPLASH SCREEN (reste visible au moins 3.5s)
   if (restoring) {
     return (
-      <LinearGradient colors={['#0a0a0a', '#0f0f0f']} style={styles.container}>
+      <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#0a0a0a']} style={styles.splashContainer}>
         <View style={styles.splashBox}>
-          <Image
-            source={require('./assets/icon.png')}
-            style={styles.splashImage}
-            resizeMode="contain"
-          />
+          <View style={styles.splashLogoWrap}>
+            <Image
+              source={require('./assets/icon.png')}
+              style={styles.splashImage}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={styles.splashTitle}>GoalPulse</Text>
-          <ActivityIndicator color="#39FF14" style={{ marginTop: 30 }} />
+          <Text style={styles.splashSubtitle}>Tous les scores en direct</Text>
+          <ActivityIndicator color="#39FF14" style={{ marginTop: 40 }} />
         </View>
         <StatusBar style="light" />
       </LinearGradient>
@@ -126,6 +142,7 @@ function AppContent() {
 
   return (
     <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#151515']} style={styles.container}>
+      {/* HEADER */}
       <View style={[styles.header, isRTL && { flexDirection: 'row-reverse' }]}>
         <View style={[styles.headerLeft, isRTL && { flexDirection: 'row-reverse' }]}>
           <View style={styles.logoCircle}>
@@ -145,7 +162,8 @@ function AppContent() {
         </TouchableOpacity>
       </View>
 
-      <View style={{ flex: 1, paddingBottom: 100 }}>
+      {/* CONTENU (padding en bas pour ne pas cacher par la nav bar) */}
+      <View style={styles.content}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
         {tab === 'rooms' && (
@@ -160,7 +178,13 @@ function AppContent() {
         )}
       </View>
 
-      <View style={styles.navBarWrapper}>
+      {/* 🎨 BARRE FLOTTANTE (plus haute sur Android) */}
+      <View
+        style={[
+          styles.navBarWrapper,
+          Platform.OS === 'android' && { bottom: 60 },
+        ]}
+      >
         <View style={[styles.navBar, isRTL && { flexDirection: 'row-reverse' }]}>
           {TABS.map((tabItem) => {
             const isActive = tab === tabItem.key;
@@ -210,12 +234,33 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
+
+  // 🎬 SPLASH
+  splashContainer: { flex: 1 },
   splashBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  splashImage: { width: 140, height: 140, borderRadius: 70 },
-  splashTitle: {
-    color: '#fff', fontSize: 32, fontWeight: 'bold',
-    letterSpacing: 2, marginTop: 25,
+  splashLogoWrap: {
+    width: 160, height: 160, borderRadius: 80,
+    backgroundColor: '#0a0a0a',
+    borderWidth: 3, borderColor: '#39FF14',
+    justifyContent: 'center', alignItems: 'center',
+    overflow: 'hidden',
+    shadowColor: '#39FF14',
+    shadowOpacity: 0.9,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 20,
   },
+  splashImage: { width: 148, height: 148, borderRadius: 74 },
+  splashTitle: {
+    color: '#fff', fontSize: 36, fontWeight: 'bold',
+    letterSpacing: 3, marginTop: 30,
+  },
+  splashSubtitle: {
+    color: '#39FF14', fontSize: 13, marginTop: 8,
+    letterSpacing: 1,
+  },
+
+  // HEADER
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', paddingHorizontal: 20, marginBottom: 15,
@@ -239,9 +284,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#333',
   },
+
+  // 📦 CONTENU (padding bas pour éviter le chevauchement)
+  content: {
+    flex: 1,
+    paddingBottom: Platform.OS === 'android' ? 130 : 110,
+  },
+
+  // 🎨 NAV
   navBarWrapper: {
     position: 'absolute',
-    bottom: Platform.OS === 'android' ? 20 : 40,
+    bottom: Platform.OS === 'android' ? 40 : 40,
     left: 0, right: 0,
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -252,6 +305,11 @@ const styles = StyleSheet.create({
     borderRadius: 30, padding: 5,
     borderWidth: 1, borderColor: '#1f1f1f',
     width: '100%', maxWidth: 400,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 10,
   },
   navItem: {
     flex: 1, height: 52, borderRadius: 26,
