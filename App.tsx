@@ -17,6 +17,7 @@ import { logout } from './authConfig';
 import { saveUserProfile } from './userService';
 import { auth } from './firebaseConfig';
 import { registerForPushNotifications } from './notificationService';
+import { LanguageProvider, useLanguage } from './LanguageContext';
 
 interface User {
   email: string;
@@ -27,11 +28,13 @@ interface User {
 
 type Tab = 'matches' | 'standings' | 'rooms' | 'profile';
 
-export default function App() {
+function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
   const [openRoom, setOpenRoom] = useState<{ code: string; name: string } | null>(null);
   const [restoring, setRestoring] = useState(true);
+
+  const { t, isRTL } = useLanguage();
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
@@ -58,10 +61,10 @@ export default function App() {
   }, [user]);
 
   const handleLogout = () => {
-    Alert.alert('Déconnexion', 'Tu veux vraiment te déconnecter ?', [
-      { text: 'Annuler', style: 'cancel' },
+    Alert.alert(t.signIn, 'Vous déconnecter ?', [
+      { text: t.cancel, style: 'cancel' },
       {
-        text: 'Déconnexion',
+        text: t.signIn,
         style: 'destructive',
         onPress: async () => {
           await logout();
@@ -71,7 +74,6 @@ export default function App() {
     ]);
   };
 
-  // 🎬 SPLASH SCREEN
   if (restoring) {
     return (
       <LinearGradient colors={['#0a0a0a', '#0f0f0f']} style={styles.container}>
@@ -89,7 +91,6 @@ export default function App() {
     );
   }
 
-  // 🔐 LOGIN
   if (!user) {
     return (
       <>
@@ -101,7 +102,6 @@ export default function App() {
 
   const displayName = user.name || user.email.split('@')[0];
 
-  // 🎮 ROOM DÉTAIL (plein écran)
   if (openRoom) {
     return (
       <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#151515']} style={styles.container}>
@@ -118,17 +118,16 @@ export default function App() {
   }
 
   const TABS: Array<{ key: Tab; icon: any; activeIcon: any; label: string }> = [
-    { key: 'matches', icon: 'football-outline', activeIcon: 'football', label: 'Matchs' },
-    { key: 'standings', icon: 'stats-chart-outline', activeIcon: 'stats-chart', label: 'Class.' },
-    { key: 'rooms', icon: 'game-controller-outline', activeIcon: 'game-controller', label: 'Salons' },
-    { key: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'Profil' },
+    { key: 'matches', icon: 'football-outline', activeIcon: 'football', label: t.matches },
+    { key: 'standings', icon: 'stats-chart-outline', activeIcon: 'stats-chart', label: t.standings },
+    { key: 'rooms', icon: 'game-controller-outline', activeIcon: 'game-controller', label: t.rooms },
+    { key: 'profile', icon: 'person-outline', activeIcon: 'person', label: t.profile },
   ];
 
   return (
     <LinearGradient colors={['#0a0a0a', '#0f0f0f', '#151515']} style={styles.container}>
-      {/* HEADER */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
+      <View style={[styles.header, isRTL && { flexDirection: 'row-reverse' }]}>
+        <View style={[styles.headerLeft, isRTL && { flexDirection: 'row-reverse' }]}>
           <View style={styles.logoCircle}>
             <Image
               source={require('./assets/icon.png')}
@@ -136,7 +135,7 @@ export default function App() {
               resizeMode="contain"
             />
           </View>
-          <View>
+          <View style={isRTL && { alignItems: 'flex-end' }}>
             <Text style={styles.headerTitle}>GoalPulse</Text>
             <Text style={styles.welcome} numberOfLines={1}>{displayName}</Text>
           </View>
@@ -146,7 +145,6 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* CONTENU */}
       <View style={{ flex: 1, paddingBottom: 100 }}>
         {tab === 'matches' && <MatchList userEmail={user.email} />}
         {tab === 'standings' && <Standings />}
@@ -162,16 +160,15 @@ export default function App() {
         )}
       </View>
 
-      {/* 🎨 BARRE FLOTTANTE */}
       <View style={styles.navBarWrapper}>
-        <View style={styles.navBar}>
-          {TABS.map((t) => {
-            const isActive = tab === t.key;
+        <View style={[styles.navBar, isRTL && { flexDirection: 'row-reverse' }]}>
+          {TABS.map((tabItem) => {
+            const isActive = tab === tabItem.key;
             return (
               <TouchableOpacity
-                key={t.key}
+                key={tabItem.key}
                 style={[styles.navItem, isActive && styles.navItemActive]}
-                onPress={() => setTab(t.key)}
+                onPress={() => setTab(tabItem.key)}
                 activeOpacity={0.7}
               >
                 {isActive && (
@@ -182,14 +179,14 @@ export default function App() {
                     style={styles.activePill}
                   />
                 )}
-                <View style={styles.navItemContent}>
+                <View style={[styles.navItemContent, isRTL && { flexDirection: 'row-reverse' }]}>
                   <Ionicons
-                    name={isActive ? t.activeIcon : t.icon}
+                    name={isActive ? tabItem.activeIcon : tabItem.icon}
                     size={20}
                     color={isActive ? '#000' : '#555'}
                   />
                   <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
-                    {t.label}
+                    {tabItem.label}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -203,18 +200,22 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AppContent />
+    </LanguageProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 55 },
-
-  // 🎬 SPLASH
   splashBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   splashImage: { width: 140, height: 140, borderRadius: 70 },
   splashTitle: {
     color: '#fff', fontSize: 32, fontWeight: 'bold',
     letterSpacing: 2, marginTop: 25,
   },
-
-  // HEADER
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', paddingHorizontal: 20, marginBottom: 15,
@@ -223,8 +224,7 @@ const styles = StyleSheet.create({
   logoCircle: {
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: '#111', borderWidth: 1.5, borderColor: '#39FF14',
-    justifyContent: 'center', alignItems: 'center',
-    overflow: 'hidden',
+    justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
   },
   headerLogo: { width: 36, height: 36, borderRadius: 18 },
   headerTitle: {
@@ -239,8 +239,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#333',
   },
-
-  // 🎨 BARRE FLOTTANTE
   navBarWrapper: {
     position: 'absolute',
     bottom: Platform.OS === 'android' ? 20 : 40,

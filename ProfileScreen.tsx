@@ -4,15 +4,16 @@ import {
   TouchableOpacity, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ref, get } from 'firebase/database';
 import { database } from './firebaseConfig';
 import { getUserKey } from './userService';
 import {
-  ALL_BADGES, Badge, LEVELS, Level,
+  ALL_BADGES, LEVELS,
   getLevelFromPoints, getNextLevel,
   subscribeUserBadges, checkAndUnlockBadges,
 } from './badgesService';
+import { useLanguage } from './LanguageContext';
+import { LANGUAGES } from './i18n';
 
 interface Props {
   userEmail: string;
@@ -20,6 +21,8 @@ interface Props {
 }
 
 export default function ProfileScreen({ userEmail, userName }: Props) {
+  const { lang, t, setLang } = useLanguage();
+
   const [loading, setLoading] = useState(true);
   const [points, setPoints] = useState(0);
   const [totalBets, setTotalBets] = useState(0);
@@ -30,7 +33,6 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
 
   const userKey = getUserKey(userEmail);
 
-  // Charger les stats
   useEffect(() => {
     const load = async () => {
       try {
@@ -50,7 +52,6 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
         setExactBets(exact);
         setPoints(pts);
 
-        // Rooms
         const rooms = roomsSnap.val() || {};
         let count = 0;
         Object.keys(rooms).forEach((code) => {
@@ -58,7 +59,6 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
         });
         setRoomsCount(count);
 
-        // Vérifier les badges
         await checkAndUnlockBadges(userEmail);
       } catch (e) {
         console.error('Erreur load profile:', e);
@@ -68,7 +68,6 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
     load();
   }, [userKey, userEmail]);
 
-  // Listener badges
   useEffect(() => {
     const unsub = subscribeUserBadges(userEmail, setUnlockedBadges);
     return () => unsub();
@@ -84,7 +83,7 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#39FF14" />
-        <Text style={styles.loadingText}>Chargement...</Text>
+        <Text style={styles.loadingText}>{t.loading}</Text>
       </View>
     );
   }
@@ -97,13 +96,10 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: 120 }}
     >
-      {/* 👤 HERO PROFILE */}
+      {/* 👤 HERO */}
       <View style={styles.hero}>
         <View style={styles.avatarWrap}>
-          <LinearGradient
-            colors={[currentLevel.color, currentLevel.color + '80']}
-            style={styles.avatarRing}
-          >
+          <View style={[styles.avatarRing, { borderColor: currentLevel.color }]}>
             <View style={styles.avatarInner}>
               <Image
                 source={require('./assets/icon.png')}
@@ -111,7 +107,7 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
                 resizeMode="contain"
               />
             </View>
-          </LinearGradient>
+          </View>
           <View style={[styles.levelBadge, { backgroundColor: currentLevel.color }]}>
             <Text style={styles.levelBadgeText}>Nv.{currentLevel.level}</Text>
           </View>
@@ -126,12 +122,12 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
         </View>
       </View>
 
-      {/* ⚡ PROGRESSION VERS NIVEAU SUIVANT */}
+      {/* ⚡ PROGRESSION */}
       {nextLevel && (
         <View style={styles.progressCard}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>
-              Prochain : {nextLevel.icon} {nextLevel.name}
+              {t.nextLevel} : {nextLevel.icon} {nextLevel.name}
             </Text>
             <Text style={styles.progressPoints}>
               {points} / {nextLevel.minPoints}
@@ -146,54 +142,79 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
             />
           </View>
           <Text style={styles.progressHint}>
-            Encore {nextLevel.minPoints - points} points
+            + {nextLevel.minPoints - points} {t.morePoints}
           </Text>
         </View>
       )}
 
-      {/* 💎 STATS GRID */}
+      {/* 💎 STATS */}
       <View style={styles.statsGrid}>
         <View style={styles.statBox}>
           <Text style={[styles.statValue, { color: '#39FF14' }]}>{points}</Text>
-          <Text style={styles.statLabel}>Points</Text>
+          <Text style={styles.statLabel}>{t.pointsLabel}</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={[styles.statValue, { color: '#00BFFF' }]}>{totalBets}</Text>
-          <Text style={styles.statLabel}>Paris</Text>
+          <Text style={styles.statLabel}>{t.betsLabel}</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={[styles.statValue, { color: '#FFD700' }]}>{exactBets}</Text>
-          <Text style={styles.statLabel}>Exacts</Text>
+          <Text style={styles.statLabel}>{t.exacts}</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={[styles.statValue, { color: '#9D4EDD' }]}>{winRate}%</Text>
-          <Text style={styles.statLabel}>Réussite</Text>
+          <Text style={styles.statLabel}>{t.winRate}</Text>
         </View>
       </View>
 
-      {/* 📊 STATS SECONDAIRES */}
+      {/* 📊 SECONDAIRES */}
       <View style={styles.secondaryRow}>
         <View style={styles.secondaryBox}>
           <Ionicons name="checkmark-circle" size={20} color="#39FF14" />
           <Text style={styles.secondaryValue}>{correctBets}</Text>
-          <Text style={styles.secondaryLabel}>Gagnés</Text>
+          <Text style={styles.secondaryLabel}>{t.ok}</Text>
         </View>
         <View style={styles.secondaryBox}>
           <Ionicons name="game-controller" size={20} color="#FF6B6B" />
           <Text style={styles.secondaryValue}>{roomsCount}</Text>
-          <Text style={styles.secondaryLabel}>Salons</Text>
+          <Text style={styles.secondaryLabel}>{t.rooms}</Text>
         </View>
         <View style={styles.secondaryBox}>
           <Ionicons name="trophy" size={20} color="#FFD700" />
           <Text style={styles.secondaryValue}>{unlockedBadges.length}</Text>
-          <Text style={styles.secondaryLabel}>Badges</Text>
+          <Text style={styles.secondaryLabel}>{t.badges}</Text>
+        </View>
+      </View>
+
+      {/* 🌐 LANGUE */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>
+          🌐 {lang === 'fr' ? 'Langue' : lang === 'en' ? 'Language' : 'اللغة'}
+        </Text>
+        <View style={styles.langRow}>
+          {LANGUAGES.map((l) => {
+            const isActive = lang === l.code;
+            return (
+              <TouchableOpacity
+                key={l.code}
+                style={[styles.langBtn, isActive && styles.langBtnActive]}
+                onPress={() => setLang(l.code)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.langFlag}>{l.flag}</Text>
+                <Text style={[styles.langName, isActive && styles.langNameActive]}>
+                  {l.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
       {/* 🏅 BADGES */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>🏅 Badges</Text>
+          <Text style={styles.sectionTitle}>🏅 {t.badges}</Text>
           <Text style={styles.sectionCount}>
             {unlockedBadges.length} / {ALL_BADGES.length}
           </Text>
@@ -214,10 +235,7 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
                   {isUnlocked ? badge.icon : '🔒'}
                 </Text>
                 <Text
-                  style={[
-                    styles.badgeName,
-                    isUnlocked && { color: badge.color },
-                  ]}
+                  style={[styles.badgeName, isUnlocked && { color: badge.color }]}
                   numberOfLines={1}
                 >
                   {badge.name}
@@ -233,7 +251,7 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
 
       {/* 📈 NIVEAUX */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>📈 Niveaux</Text>
+        <Text style={styles.sectionTitle}>📈 {t.levels}</Text>
         {LEVELS.map((lvl) => {
           const isCurrent = lvl.level === currentLevel.level;
           const isReached = points >= lvl.minPoints;
@@ -249,21 +267,14 @@ export default function ProfileScreen({ userEmail, userName }: Props) {
                 {lvl.icon}
               </Text>
               <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.levelCardName,
-                    isReached && { color: lvl.color },
-                  ]}
-                >
-                  Niveau {lvl.level} • {lvl.name}
+                <Text style={[styles.levelCardName, isReached && { color: lvl.color }]}>
+                  {t.level} {lvl.level} • {lvl.name}
                 </Text>
-                <Text style={styles.levelCardPoints}>
-                  {lvl.minPoints}+ points
-                </Text>
+                <Text style={styles.levelCardPoints}>{lvl.minPoints}+ {t.pointsLabel}</Text>
               </View>
               {isCurrent && (
                 <View style={[styles.currentPill, { backgroundColor: lvl.color }]}>
-                  <Text style={styles.currentPillText}>TU ES ICI</Text>
+                  <Text style={styles.currentPillText}>★</Text>
                 </View>
               )}
               {isReached && !isCurrent && (
@@ -282,21 +293,21 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#39FF14', marginTop: 10 },
 
-  // 👤 HERO
   hero: { alignItems: 'center', paddingVertical: 25 },
   avatarWrap: { position: 'relative', marginBottom: 15 },
   avatarRing: {
     width: 110, height: 110, borderRadius: 55,
     padding: 3,
     justifyContent: 'center', alignItems: 'center',
+    borderWidth: 3,
   },
   avatarInner: {
-    width: 104, height: 104, borderRadius: 52,
+    width: 100, height: 100, borderRadius: 50,
     backgroundColor: '#0a0a0a',
     justifyContent: 'center', alignItems: 'center',
     overflow: 'hidden',
   },
-  avatarImage: { width: 96, height: 96, borderRadius: 48 },
+  avatarImage: { width: 92, height: 92, borderRadius: 46 },
   levelBadge: {
     position: 'absolute',
     bottom: -4, right: -4,
@@ -317,7 +328,6 @@ const styles = StyleSheet.create({
   levelIcon: { fontSize: 16 },
   levelName: { fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 },
 
-  // ⚡ PROGRESSION
   progressCard: {
     backgroundColor: '#141414',
     borderRadius: 16, padding: 16,
@@ -340,7 +350,6 @@ const styles = StyleSheet.create({
     color: '#666', fontSize: 11, marginTop: 8, textAlign: 'center',
   },
 
-  // 💎 STATS GRID
   statsGrid: {
     flexDirection: 'row', gap: 10, marginBottom: 12,
   },
@@ -353,7 +362,6 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 22, fontWeight: 'bold' },
   statLabel: { color: '#666', fontSize: 11, marginTop: 4, fontWeight: '600' },
 
-  // 📊 SECONDAIRE
   secondaryRow: {
     flexDirection: 'row', gap: 10, marginBottom: 24,
   },
@@ -366,7 +374,35 @@ const styles = StyleSheet.create({
   secondaryValue: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   secondaryLabel: { color: '#555', fontSize: 10, fontWeight: '600' },
 
-  // 🏅 BADGES
+  // 🌐 LANGUE
+  langRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  langBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#262626',
+    alignItems: 'center',
+    gap: 6,
+  },
+  langBtnActive: {
+    backgroundColor: '#39FF1415',
+    borderColor: '#39FF14',
+  },
+  langFlag: { fontSize: 24 },
+  langName: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  langNameActive: {
+    color: '#39FF14',
+  },
+
   section: { marginBottom: 24 },
   sectionHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
@@ -374,6 +410,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#fff', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5,
+    marginBottom: 12,
   },
   sectionCount: { color: '#39FF14', fontSize: 13, fontWeight: 'bold' },
 
@@ -398,7 +435,6 @@ const styles = StyleSheet.create({
     color: '#444', fontSize: 8, textAlign: 'center',
   },
 
-  // 📈 NIVEAUX
   levelCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: '#0f0f0f', borderRadius: 14,
@@ -409,10 +445,10 @@ const styles = StyleSheet.create({
   levelCardName: { color: '#ccc', fontSize: 13, fontWeight: '600' },
   levelCardPoints: { color: '#555', fontSize: 11, marginTop: 2 },
   currentPill: {
-    paddingHorizontal: 8, paddingVertical: 4,
+    paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: 8,
   },
   currentPillText: {
-    color: '#000', fontSize: 9, fontWeight: 'bold', letterSpacing: 0.5,
+    color: '#000', fontSize: 11, fontWeight: 'bold',
   },
 });
