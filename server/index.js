@@ -12,7 +12,7 @@ app.use(cors());
 // 💾 CACHE MÉMOIRE (économise les appels MCP)
 // ==================================================
 const cache = new Map();
-const CACHE_TTL = 60 * 1000; // 60 secondes
+const CACHE_TTL = 20 * 1000; // 20 secondes
 
 const getCached = (key) => {
   const item = cache.get(key);
