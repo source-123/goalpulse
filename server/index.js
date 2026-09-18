@@ -8,6 +8,7 @@ const SSE_URL = 'https://livescoremcp.com/sse';
 const FD_TOKEN = '20fcd3d508e24984b82ba762b50d0ab0';
 
 app.use(cors());
+app.use(express.json());
 
 // ==================================================
 // 💾 CACHE MÉMOIRE
@@ -18,7 +19,6 @@ const CACHE_TTL = 30 * 1000;
 const getCached = (key) => {
   const item = cache.get(key);
   if (item && Date.now() - item.ts < CACHE_TTL) {
-    console.log(`⚡ Cache HIT: ${key}`);
     return item.data;
   }
   return null;
@@ -26,7 +26,6 @@ const getCached = (key) => {
 
 const setCache = (key, data) => {
   cache.set(key, { data, ts: Date.now() });
-  console.log(`💾 Cache SET: ${key}`);
 };
 
 // ==================================================
@@ -34,7 +33,7 @@ const setCache = (key, data) => {
 // ==================================================
 const callMCPTool = (toolName, args = {}) => {
   return new Promise((resolve, reject) => {
-    console.log(`🔧 MCP: ${toolName}`, JSON.stringify(args));
+    console.log(`🔧 MCP: ${toolName}`);
     const es = new EventSource(SSE_URL);
     let requestId = null;
     let resolved = false;
@@ -114,13 +113,12 @@ app.get('/api/live-scores', async (req, res) => {
     setCache('live-scores', result);
     res.json(result);
   } catch (err) {
-    console.error('❌ Erreur live-scores:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ==================================================
-// 🎯 INDEX DES SCORES (pour vérifier paris)
+// 🎯 INDEX DES SCORES
 // ==================================================
 app.get('/api/check-scores', async (req, res) => {
   const cached = getCached('check-scores');
@@ -141,12 +139,10 @@ app.get('/api/check-scores', async (req, res) => {
         });
       });
     });
-    console.log(`🎯 check-scores: ${Object.keys(index).length} matchs`);
     const result = { success: true, data: index };
     setCache('check-scores', result);
     res.json(result);
   } catch (err) {
-    console.error('❌ check-scores:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -160,9 +156,7 @@ app.get('/api/matches/:date', async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
-    const data = await callMCPTool('get_day_fixtures', {
-      date: req.params.date,
-    });
+    const data = await callMCPTool('get_day_fixtures', { date: req.params.date });
     const result = { success: true, data };
     setCache(key, result);
     res.json(result);
@@ -198,7 +192,6 @@ app.get('/api/standings/:code', async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
-    console.log(`🏆 Fetch standings: ${req.params.code}`);
     const fdRes = await fetch(
       `https://api.football-data.org/v4/competitions/${req.params.code}/standings`,
       {
@@ -244,7 +237,65 @@ app.get('/api/standings/:code', async (req, res) => {
     setCache(key, result);
     res.json(result);
   } catch (err) {
-    console.error('❌ Erreur standings:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================================================
+// 🔔 NOTIFICATIONS PUSH (via Expo Push API)
+// ==================================================
+app.post('/api/notify', async (req, res) => {
+  const { userKeys, title, body, data } = req.body;
+
+  if (!userKeys || !Array.isArray(userKeys) || userKeys.length === 0) {
+    return res.status(400).json({ success: false, error: 'userKeys requis' });
+  }
+
+  try {
+    const tokens = [];
+
+    for (const userKey of userKeys) {
+      try {
+        const fbRes = await fetch(
+          `https://goalpulse-app-b000c-default-rtdb.firebaseio.com/users/${userKey}/pushToken.json`
+        );
+        const tokenData = await fbRes.json();
+        if (tokenData?.token) {
+          tokens.push(tokenData.token);
+        }
+      } catch (e) {
+        console.error(`Token fetch error for ${userKey}:`, e.message);
+      }
+    }
+
+    if (tokens.length === 0) {
+      return res.json({ success: true, sent: 0, message: 'Aucun token' });
+    }
+
+    const messages = tokens.map((token) => ({
+      to: token,
+      sound: 'default',
+      title,
+      body,
+      data: data || {},
+      channelId: 'default',
+    }));
+
+    const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(messages),
+    });
+
+    const expoJson = await expoRes.json();
+    console.log(`🔔 Notifs envoyées: ${tokens.length}`);
+
+    res.json({ success: true, sent: tokens.length });
+  } catch (err) {
+    console.error('❌ Erreur notify:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -253,10 +304,7 @@ app.get('/api/standings/:code', async (req, res) => {
 // 🚀 DÉMARRAGE
 // ==================================================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('');
   console.log(`🚀 Proxy GoalPulse sur port ${PORT}`);
   console.log(`💾 Cache: ${CACHE_TTL / 1000}s`);
-  console.log(`🌐 LiveScore MCP: ${SSE_URL}`);
-  console.log(`🏆 Football-Data.org: activé`);
-  console.log('');
+  console.log(`🔔 Notifications: activées`);
 });

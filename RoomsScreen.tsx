@@ -4,6 +4,10 @@ import {
   ScrollView, Alert, ActivityIndicator, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ref, get } from 'firebase/database';
+import { database } from './firebaseConfig';
+import { getUserKey } from './userService';
+import { sendPushNotification } from './notificationService';
 import {
   subscribeMyRooms, createRoom, joinRoom, Room,
 } from './roomService';
@@ -24,23 +28,19 @@ export default function RoomsScreen({ userEmail, userName, onOpenRoom }: Props) 
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    // ⏰ Timeout : si Firebase ne répond pas en 3s, on débloque
-    const timeout = setTimeout(() => {
-      console.log('⚠️ Timeout Firebase — forçage');
-      setLoading(false);
-    }, 3000);
+    const timeout = setTimeout(() => setLoading(false), 3000);
 
     const unsub = subscribeMyRooms(userEmail, (list) => {
-      console.log('✅ Salons reçus:', list.length);
       setRooms(list);
       setLoading(false);
       clearTimeout(timeout);
     });
-return () => {
+    return () => {
       clearTimeout(timeout);
       unsub();
     };
   }, [userEmail]);
+
   const handleCreate = async () => {
     if (!roomName.trim()) {
       Alert.alert('Erreur', 'Donne un nom à ton salon');
@@ -52,10 +52,7 @@ return () => {
     if (res.success && res.code) {
       setShowCreate(false);
       setRoomName('');
-      Alert.alert(
-        '🎉 Salon créé !',
-        `Code : ${res.code}\n\nPartage ce code avec tes amis pour qu'ils rejoignent.`,
-      );
+      Alert.alert('🎉 Salon créé !', `Code : ${res.code}\n\nPartage avec tes amis !`);
     } else {
       Alert.alert('Erreur', res.error || 'Erreur');
     }
@@ -73,6 +70,28 @@ return () => {
       const joinedCode = joinCode.trim().toUpperCase();
       setShowJoin(false);
       setJoinCode('');
+
+      // 🔔 Notifier le créateur du salon
+      try {
+        const creatorSnap = await get(
+          ref(database, `rooms/${joinedCode}/info/createdBy`)
+        );
+        if (creatorSnap.exists()) {
+          const creatorKey = creatorSnap.val();
+          const myKey = getUserKey(userEmail);
+          if (creatorKey !== myKey) {
+            sendPushNotification(
+              [creatorKey],
+              '👥 Nouveau membre !',
+              `${userName} a rejoint ton salon "${res.roomName}"`,
+              { roomCode: joinedCode }
+            );
+          }
+        }
+      } catch (e) {
+        console.error('Erreur notif:', e);
+      }
+
       Alert.alert('✅ Rejoint', `Bienvenue dans "${res.roomName}"`);
       onOpenRoom(joinedCode, res.roomName || 'Salon');
     } else {
@@ -91,7 +110,6 @@ return () => {
 
   return (
     <View style={styles.container}>
-      {/* Actions */}
       <View style={styles.actionsRow}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.actionBtnCreate]}
@@ -105,13 +123,10 @@ return () => {
           onPress={() => setShowJoin(true)}
         >
           <Ionicons name="enter" size={20} color="#39FF14" />
-          <Text style={[styles.actionBtnText, { color: '#39FF14' }]}>
-            Rejoindre
-          </Text>
+          <Text style={[styles.actionBtnText, { color: '#39FF14' }]}>Rejoindre</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Liste */}
       {rooms.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="game-controller-outline" size={60} color="#333" />
@@ -122,9 +137,7 @@ return () => {
         </View>
       ) : (
         <ScrollView>
-          <Text style={styles.sectionTitle}>
-            🎮 Mes salons ({rooms.length})
-          </Text>
+          <Text style={styles.sectionTitle}>🎮 Mes salons ({rooms.length})</Text>
           {rooms.map((room) => {
             const memberCount = Object.keys(room.members || {}).length;
             return (
@@ -138,9 +151,7 @@ return () => {
                   <Ionicons name="game-controller" size={24} color="#39FF14" />
                 </View>
                 <View style={styles.roomInfo}>
-                  <Text style={styles.roomName} numberOfLines={1}>
-                    {room.name}
-                  </Text>
+                  <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
                   <View style={styles.roomMeta}>
                     <Text style={styles.roomCode}>{room.code}</Text>
                     <Text style={styles.roomSep}>•</Text>
@@ -161,12 +172,10 @@ return () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>🎮 Créer un salon</Text>
-            <Text style={styles.modalSub}>
-              Un code unique sera généré pour inviter tes amis
-            </Text>
+            <Text style={styles.modalSub}>Un code sera généré pour inviter tes amis</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Nom du salon (ex: Les Champions)"
+              placeholder="Nom du salon"
               placeholderTextColor="#666"
               value={roomName}
               onChangeText={setRoomName}
@@ -176,10 +185,7 @@ return () => {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => {
-                  setShowCreate(false);
-                  setRoomName('');
-                }}
+                onPress={() => { setShowCreate(false); setRoomName(''); }}
               >
                 <Text style={styles.modalBtnCancelText}>Annuler</Text>
               </TouchableOpacity>
@@ -188,9 +194,7 @@ return () => {
                 onPress={handleCreate}
                 disabled={processing}
               >
-                {processing ? (
-                  <ActivityIndicator color="#000" size="small" />
-                ) : (
+                {processing ? <ActivityIndicator color="#000" size="small" /> : (
                   <>
                     <Ionicons name="checkmark" size={18} color="#000" />
                     <Text style={styles.modalBtnSaveText}>Créer</Text>
@@ -206,10 +210,8 @@ return () => {
       <Modal visible={showJoin} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>🚪 Rejoindre un salon</Text>
-            <Text style={styles.modalSub}>
-              Entre le code que ton ami t'a partagé
-            </Text>
+            <Text style={styles.modalTitle}>🚪 Rejoindre</Text>
+            <Text style={styles.modalSub}>Entre le code reçu de ton ami</Text>
             <TextInput
               style={[styles.modalInput, styles.codeInput]}
               placeholder="GP-XXXXX"
@@ -223,10 +225,7 @@ return () => {
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => {
-                  setShowJoin(false);
-                  setJoinCode('');
-                }}
+                onPress={() => { setShowJoin(false); setJoinCode(''); }}
               >
                 <Text style={styles.modalBtnCancelText}>Annuler</Text>
               </TouchableOpacity>
@@ -235,9 +234,7 @@ return () => {
                 onPress={handleJoin}
                 disabled={processing}
               >
-                {processing ? (
-                  <ActivityIndicator color="#000" size="small" />
-                ) : (
+                {processing ? <ActivityIndicator color="#000" size="small" /> : (
                   <>
                     <Ionicons name="enter" size={18} color="#000" />
                     <Text style={styles.modalBtnSaveText}>Rejoindre</Text>
@@ -290,10 +287,7 @@ const styles = StyleSheet.create({
   },
   roomInfo: { flex: 1 },
   roomName: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  roomMeta: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 5, marginTop: 4,
-  },
+  roomMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   roomCode: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
   roomSep: { color: '#444', fontSize: 11 },
   roomMembers: { color: '#666', fontSize: 11 },
@@ -307,23 +301,16 @@ const styles = StyleSheet.create({
     width: '100%', maxWidth: 400,
     borderWidth: 1, borderColor: '#333',
   },
-  modalTitle: {
-    color: '#fff', fontSize: 18, fontWeight: 'bold', textAlign: 'center',
-  },
-  modalSub: {
-    color: '#666', fontSize: 12, textAlign: 'center',
-    marginTop: 6, marginBottom: 20,
-  },
+  modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', textAlign: 'center' },
+  modalSub: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 6, marginBottom: 20 },
   modalInput: {
     backgroundColor: '#1c1c1c', color: '#fff',
     paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12,
-    borderWidth: 1, borderColor: '#333', fontSize: 15,
-    marginBottom: 15,
+    borderWidth: 1, borderColor: '#333', fontSize: 15, marginBottom: 15,
   },
   codeInput: {
     textAlign: 'center', fontSize: 22, fontWeight: 'bold',
-    letterSpacing: 3, color: '#39FF14',
-    borderColor: '#39FF14',
+    letterSpacing: 3, color: '#39FF14', borderColor: '#39FF14',
   },
   modalActions: { flexDirection: 'row', gap: 10 },
   modalBtn: {
